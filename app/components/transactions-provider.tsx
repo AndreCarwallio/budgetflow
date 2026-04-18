@@ -25,7 +25,14 @@ import {
   fetchSubcategories,
   renameCategory,
   renameSubcategory,
+  updateCategoryColor,
 } from "../lib/categories-api";
+import {
+  fetchAppPreferences,
+  upsertChartPalette,
+  type AppPreferences,
+} from "../lib/preferences-api";
+import { resetUserData as resetUserDataRows } from "../lib/reset-data-api";
 import {
   createSavingsGoal,
   fetchSavingsGoal,
@@ -38,10 +45,13 @@ import {
   removeTransaction,
 } from "../lib/transactions-api";
 import {
+  chartPalettes,
+  defaultCategoryColors,
   defaultTransactionCategories,
   initialBudgets,
   type Budget,
   type Category,
+  type ChartPalette,
   type SavingsGoal,
   type Subcategory,
   type Transaction,
@@ -50,12 +60,18 @@ import {
 } from "../lib/transactions";
 
 const CURRENCY_STORAGE_KEY = "budgetflow.currencySymbol";
+const DEFAULT_CHART_PALETTE: ChartPalette = "ocean";
+
+function getFallbackCategoryColor(categoryName: string) {
+  return defaultCategoryColors[categoryName] ?? "#94a3b8";
+}
 
 function createDefaultCategories(userId: string): Category[] {
   return defaultTransactionCategories.map((name, index) => ({
     id: `default-${index}-${name.toLowerCase()}`,
     userId,
     name,
+    color: getFallbackCategoryColor(name),
     createdAt: new Date(0).toISOString(),
     isFallback: true,
   }));
@@ -79,6 +95,14 @@ function mergeWithDefaultCategories(
 
   return Array.from(categoriesByName.values()).sort((left, right) =>
     left.name.localeCompare(right.name)
+  );
+}
+
+function pickCategoryColor(name: string) {
+  return (
+    defaultCategoryColors[name] ??
+    chartPalettes[name.length % chartPalettes.length]?.colors[0] ??
+    "#0f766e"
   );
 }
 
@@ -150,6 +174,10 @@ type TransactionsContextValue = {
   ) => Promise<boolean>;
   deleteSubcategory: (subcategoryId: string) => Promise<void>;
   getSubcategoriesForCategory: (categoryName: string) => Subcategory[];
+  getCategoryColor: (categoryName: string) => string;
+  saveCategoryColor: (categoryId: string, color: string) => Promise<boolean>;
+  chartPalette: ChartPalette;
+  saveChartPalette: (palette: ChartPalette) => Promise<boolean>;
   isAddModalOpen: boolean;
   openAddModal: () => void;
   closeAddModal: () => void;
@@ -178,6 +206,11 @@ type TransactionsContextValue = {
   categoriesError: string;
   clearCategoriesError: () => void;
   hasLoadedCategories: boolean;
+  isPreferencesLoading: boolean;
+  preferencesError: string;
+  clearPreferencesError: () => void;
+  resetUserData: () => Promise<boolean>;
+  isResettingUserData: boolean;
 };
 
 const TransactionsContext = createContext<TransactionsContextValue | null>(null);
@@ -213,6 +246,10 @@ export function TransactionsProvider({
   const [isCategoriesLoading, setIsCategoriesLoading] = useState(true);
   const [hasLoadedCategories, setHasLoadedCategories] = useState(false);
   const [categoriesError, setCategoriesError] = useState("");
+  const [preferences, setPreferences] = useState<AppPreferences | null>(null);
+  const [isPreferencesLoading, setIsPreferencesLoading] = useState(true);
+  const [preferencesError, setPreferencesError] = useState("");
+  const [isResettingUserData, setIsResettingUserData] = useState(false);
   const [currencySymbol, setCurrencySymbol] = useState<"$" | "Rs">(() => {
     const storedCurrencySymbol = readStoredJSON<"$" | "Rs">(
       CURRENCY_STORAGE_KEY
@@ -295,6 +332,16 @@ export function TransactionsProvider({
 
     await refreshCategories();
   }, [refreshCategories, userId]);
+
+  const refreshPreferences = useCallback(async () => {
+    if (!userId) {
+      setPreferences(null);
+      return;
+    }
+
+    const loadedPreferences = await fetchAppPreferences(supabase, userId);
+    setPreferences(loadedPreferences);
+  }, [supabase, userId]);
 
   useEffect(() => {
     let isActive = true;
@@ -503,6 +550,49 @@ export function TransactionsProvider({
   }, [supabase, userId]);
 
   useEffect(() => {
+    let isActive = true;
+
+    async function loadPreferences() {
+      if (!userId) {
+        if (isActive) {
+          setPreferences(null);
+          setIsPreferencesLoading(false);
+        }
+        return;
+      }
+
+      setIsPreferencesLoading(true);
+      setPreferencesError("");
+
+      try {
+        const loadedPreferences = await fetchAppPreferences(supabase, userId);
+
+        if (isActive) {
+          setPreferences(loadedPreferences);
+        }
+      } catch (error) {
+        if (isActive) {
+          setPreferencesError(
+            error instanceof Error
+              ? error.message
+              : "Unable to load app preferences right now."
+          );
+        }
+      } finally {
+        if (isActive) {
+          setIsPreferencesLoading(false);
+        }
+      }
+    }
+
+    void loadPreferences();
+
+    return () => {
+      isActive = false;
+    };
+  }, [supabase, userId]);
+
+  useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
@@ -512,6 +602,14 @@ export function TransactionsProvider({
       JSON.stringify(currencySymbol)
     );
   }, [currencySymbol]);
+
+  const chartPalette = preferences?.chartPalette ?? DEFAULT_CHART_PALETTE;
+  const getCategoryColor = useCallback(
+    (categoryName: string) =>
+      categories.find((category) => category.name === categoryName)?.color ??
+      getFallbackCategoryColor(categoryName),
+    [categories]
+  );
 
   const value = useMemo<TransactionsContextValue>(
     () => ({
@@ -690,7 +788,7 @@ export function TransactionsProvider({
         setCategoriesError("");
 
         try {
-          await createCategory(supabase, userId, trimmedName);
+          await createCategory(supabase, userId, trimmedName, pickCategoryColor(trimmedName));
           await refreshCategories();
           return trimmedName;
         } catch (error) {
@@ -919,6 +1017,62 @@ export function TransactionsProvider({
         subcategories.filter(
           (subcategory) => subcategory.categoryName === categoryName
         ),
+      getCategoryColor,
+      saveCategoryColor: async (categoryId, color) => {
+        if (!userId) {
+          setPreferencesError("You must be logged in to manage category colors.");
+          return false;
+        }
+
+        const category = categories.find((item) => item.id === categoryId);
+
+        if (!category) {
+          setPreferencesError("Unable to find this category.");
+          return false;
+        }
+
+        setPreferencesError("");
+
+        try {
+          if (category.isFallback) {
+            await createCategory(supabase, userId, category.name, color);
+          } else {
+            await updateCategoryColor(supabase, userId, categoryId, color);
+          }
+
+          await refreshCategories();
+          return true;
+        } catch (error) {
+          setPreferencesError(
+            error instanceof Error
+              ? error.message
+              : "Unable to save this category color right now."
+          );
+          return false;
+        }
+      },
+      chartPalette,
+      saveChartPalette: async (palette) => {
+        if (!userId) {
+          setPreferencesError("You must be logged in to manage chart colors.");
+          return false;
+        }
+
+        setPreferencesError("");
+
+        try {
+          await upsertChartPalette(supabase, userId, palette);
+          await refreshPreferences();
+          return true;
+        } catch (error) {
+          setPreferencesError(
+            error instanceof Error
+              ? error.message
+              : "Unable to save chart preferences right now."
+          );
+          return false;
+        }
+      },
       isAddModalOpen,
       openAddModal: () => {
         setTransactionsError("");
@@ -961,14 +1115,57 @@ export function TransactionsProvider({
       categoriesError,
       clearCategoriesError: () => setCategoriesError(""),
       hasLoadedCategories,
+      isPreferencesLoading,
+      preferencesError,
+      clearPreferencesError: () => setPreferencesError(""),
+      resetUserData: async () => {
+        if (!userId) {
+          setPreferencesError("You must be logged in to reset data.");
+          return false;
+        }
+
+        setPreferencesError("");
+        setIsResettingUserData(true);
+
+        try {
+          await resetUserDataRows(supabase, userId);
+          setTransactions([]);
+          setBudgets([]);
+          setSavingsGoal(null);
+          setSubcategories([]);
+          setPreferences(null);
+          setCategories(createDefaultCategories(userId));
+          setIsAddModalOpen(false);
+          setIsBudgetModalOpen(false);
+          setEditingBudget(null);
+          setIsSavingsGoalModalOpen(false);
+          setTransactionsError("");
+          setBudgetsError("");
+          setSavingsGoalError("");
+          setCategoriesError("");
+          return true;
+        } catch (error) {
+          setPreferencesError(
+            error instanceof Error
+              ? error.message
+              : "Unable to reset your data right now."
+          );
+          return false;
+        } finally {
+          setIsResettingUserData(false);
+        }
+      },
+      isResettingUserData,
     }),
     [
       budgets,
       budgetsError,
       categories,
       categoriesError,
+      chartPalette,
       currencySymbol,
       editingBudget,
+      getCategoryColor,
       hasLoadedBudgets,
       hasLoadedCategories,
       hasLoadedSavingsGoal,
@@ -977,12 +1174,16 @@ export function TransactionsProvider({
       isBudgetModalOpen,
       isBudgetsLoading,
       isCategoriesLoading,
+      isPreferencesLoading,
+      isResettingUserData,
       isSavingsGoalLoading,
       isSavingsGoalModalOpen,
       isTransactionsLoading,
+      preferencesError,
       refreshBudgets,
       refreshCategories,
       refreshCategoriesDependencies,
+      refreshPreferences,
       refreshSavingsGoal,
       refreshTransactions,
       savingsGoal,

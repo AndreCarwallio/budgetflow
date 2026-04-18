@@ -9,17 +9,8 @@ import {
   getTotalSavingsValue,
   getWeeklySpendingPoints,
 } from "../lib/dashboard-metrics";
+import { chartPalettes } from "../lib/transactions";
 import { useTransactions } from "./transactions-provider";
-
-const categoryBreakdownColors = [
-  "bg-slate-900",
-  "bg-teal-600",
-  "bg-sky-500",
-  "bg-amber-500",
-  "bg-rose-500",
-  "bg-violet-500",
-  "bg-slate-400",
-] as const;
 
 function formatCurrency(amount: number, currencySymbol: string) {
   const formattedAmount = new Intl.NumberFormat("en-US", {
@@ -36,6 +27,14 @@ function formatDate(date: string) {
     day: "numeric",
     year: "numeric",
   }).format(new Date(`${date}T00:00:00`));
+}
+
+function withOpacity(hexColor: string, alpha: string) {
+  if (/^#[0-9a-f]{6}$/i.test(hexColor)) {
+    return `${hexColor}${alpha}`;
+  }
+
+  return hexColor;
 }
 
 function SummaryCard({
@@ -77,6 +76,8 @@ export function DashboardView() {
     hasLoadedTransactions,
     isBudgetsLoading,
     isTransactionsLoading,
+    chartPalette,
+    getCategoryColor,
     savingsGoal,
     transactions,
     transactionsError,
@@ -110,6 +111,9 @@ export function DashboardView() {
     0
   );
   const budgetUsageSummary = getBudgetUsageSummary(budgets, transactions);
+  const activeChartPalette =
+    chartPalettes.find((palette) => palette.id === chartPalette) ??
+    chartPalettes[0];
   const subcategoryBreakdown = monthlyTransactions
     .filter((transaction) => transaction.type === "expense" && transaction.subcategory)
     .reduce<Record<string, Record<string, number>>>((accumulator, transaction) => {
@@ -214,7 +218,16 @@ export function DashboardView() {
                   className="flex flex-col gap-3 rounded-2xl border border-line px-4 py-4 transition hover:bg-slate-50 sm:flex-row sm:items-center sm:justify-between"
                 >
                   <div className="flex items-center gap-4">
-                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-accent-soft text-sm font-semibold text-accent">
+                    <div
+                      className="flex h-11 w-11 items-center justify-center rounded-2xl text-sm font-semibold"
+                      style={{
+                        backgroundColor: withOpacity(
+                          getCategoryColor(transaction.category),
+                          "1A"
+                        ),
+                        color: getCategoryColor(transaction.category),
+                      }}
+                    >
                       {transaction.category.slice(0, 2).toUpperCase()}
                     </div>
                     <div>
@@ -282,9 +295,10 @@ export function DashboardView() {
                 className="flex flex-1 flex-col items-center justify-end gap-3"
               >
                 <div
-                  className="w-full rounded-t-2xl bg-gradient-to-t from-accent to-teal-300"
+                  className="w-full rounded-t-2xl"
                   style={{
                     height: `${Math.max((point.amount / maxTrendAmount) * 160, 18)}px`,
+                    backgroundImage: `linear-gradient(to top, ${activeChartPalette.colors[0]}, ${activeChartPalette.colors[1]})`,
                   }}
                 />
                 <span className="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">
@@ -323,9 +337,10 @@ export function DashboardView() {
                 </p>
               </div>
             ) : (
-              breakdown.map(([category, amount], index) => {
+              breakdown.map(([category, amount]) => {
                 const barWidth =
                   breakdownTotal > 0 ? Math.max((amount / breakdownTotal) * 100, 10) : 0;
+                const categoryColor = getCategoryColor(category);
 
                 return (
                   <div key={category}>
@@ -351,12 +366,11 @@ export function DashboardView() {
                     </div>
                     <div className="h-3 rounded-full bg-slate-100">
                       <div
-                        className={`h-3 rounded-full transition-[width] ${
-                          categoryBreakdownColors[
-                            index % categoryBreakdownColors.length
-                          ]
-                        }`}
-                        style={{ width: `${Math.min(barWidth, 100)}%` }}
+                        className="h-3 rounded-full transition-[width]"
+                        style={{
+                          width: `${Math.min(barWidth, 100)}%`,
+                          backgroundColor: categoryColor,
+                        }}
                       />
                     </div>
                     {expandedCategories[category] ? (
@@ -443,9 +457,15 @@ export function DashboardView() {
                     className="rounded-2xl border border-line bg-slate-50 px-4 py-4"
                   >
                     <div className="flex items-center justify-between gap-4">
-                      <h3 className="font-semibold text-slate-950">
-                        {budget.category}
-                      </h3>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="h-2.5 w-2.5 rounded-full"
+                          style={{ backgroundColor: getCategoryColor(budget.category) }}
+                        />
+                        <h3 className="font-semibold text-slate-950">
+                          {budget.category}
+                        </h3>
+                      </div>
                       <p className="text-sm font-semibold text-slate-950">
                         {roundedPercentage}%
                       </p>
@@ -453,16 +473,16 @@ export function DashboardView() {
 
                     <div className="mt-3 h-3 rounded-full bg-white">
                       <div
-                        className={`h-3 rounded-full ${
-                          budget.usagePercentage >= 90
-                            ? "bg-rose-500"
-                            : budget.usagePercentage >= 60
-                              ? "bg-amber-500"
-                              : "bg-teal-500"
-                        }`}
+                        className="h-3 rounded-full"
                         style={{
                           width: `${visualPercentage}%`,
                           minWidth: budget.usedAmount > 0 ? "10px" : "0px",
+                          backgroundColor:
+                            budget.usagePercentage >= 90
+                              ? "#ef4444"
+                              : budget.usagePercentage >= 60
+                                ? "#f59e0b"
+                                : "#14b8a6",
                         }}
                       />
                     </div>

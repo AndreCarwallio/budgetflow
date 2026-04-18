@@ -5,6 +5,7 @@ type CategoryRow = {
   id: string;
   user_id: string;
   name: string;
+  color?: string | null;
   created_at: string;
 };
 
@@ -21,8 +22,18 @@ function mapCategory(row: CategoryRow): Category {
     id: row.id,
     userId: row.user_id,
     name: row.name,
+    color: row.color,
     createdAt: row.created_at,
   };
+}
+
+function isMissingColorColumnError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return message.includes("color") && message.includes("column");
 }
 
 function mapSubcategory(row: SubcategoryRow): Subcategory {
@@ -39,28 +50,80 @@ export async function fetchCategories(
   supabase: SupabaseClient,
   userId: string
 ) {
-  const { data, error } = await supabase
-    .from("categories")
-    .select("id, user_id, name, created_at")
-    .eq("user_id", userId)
-    .order("name", { ascending: true });
+  try {
+    const { data, error } = await supabase
+      .from("categories")
+      .select("id, user_id, name, color, created_at")
+      .eq("user_id", userId)
+      .order("name", { ascending: true });
 
-  if (error) {
-    throw error;
+    if (error) {
+      throw error;
+    }
+
+    return (data ?? []).map((row) => mapCategory(row as CategoryRow));
+  } catch (error) {
+    if (!isMissingColorColumnError(error)) {
+      throw error;
+    }
+
+    const { data, error: fallbackError } = await supabase
+      .from("categories")
+      .select("id, user_id, name, created_at")
+      .eq("user_id", userId)
+      .order("name", { ascending: true });
+
+    if (fallbackError) {
+      throw fallbackError;
+    }
+
+    return (data ?? []).map((row) => mapCategory(row as CategoryRow));
   }
-
-  return (data ?? []).map((row) => mapCategory(row as CategoryRow));
 }
 
 export async function createCategory(
   supabase: SupabaseClient,
   userId: string,
-  name: string
+  name: string,
+  color?: string | null
 ) {
-  const { error } = await supabase.from("categories").insert({
-    user_id: userId,
-    name,
-  });
+  try {
+    const { error } = await supabase.from("categories").insert({
+      user_id: userId,
+      name,
+      color: color ?? null,
+    });
+
+    if (error) {
+      throw error;
+    }
+  } catch (error) {
+    if (!isMissingColorColumnError(error)) {
+      throw error;
+    }
+
+    const { error: fallbackError } = await supabase.from("categories").insert({
+      user_id: userId,
+      name,
+    });
+
+    if (fallbackError) {
+      throw fallbackError;
+    }
+  }
+}
+
+export async function updateCategoryColor(
+  supabase: SupabaseClient,
+  userId: string,
+  categoryId: string,
+  color: string
+) {
+  const { error } = await supabase
+    .from("categories")
+    .update({ color })
+    .eq("id", categoryId)
+    .eq("user_id", userId);
 
   if (error) {
     throw error;
