@@ -150,82 +150,122 @@ export function SettingsView() {
                     key={category.id}
                     className="rounded-2xl border border-line bg-slate-50 px-4 py-4"
                   >
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3">
-                          <span
-                            className="h-3 w-3 rounded-full"
-                            style={{ backgroundColor: categoryColor }}
-                          />
-                          <input
-                            type="text"
-                            value={categoryDraft}
-                            onChange={(event) =>
-                              setDraftCategoryNames((current) => ({
-                                ...current,
-                                [category.id]: event.target.value,
-                              }))
-                            }
-                            className="flex-1 rounded-2xl border border-line bg-white px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-slate-400"
-                          />
-                        </div>
-
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          {categoryColorOptions.map((colorOption) => (
-                            <button
-                              key={colorOption}
-                              type="button"
-                              aria-label={`Set ${category.name} color to ${colorOption}`}
-                              onClick={() => {
-                                clearPreferencesError();
-                                startTransition(async () => {
-                                  await saveCategoryColor(category.id, colorOption);
-                                });
-                              }}
-                              className={`h-8 w-8 rounded-full border-2 transition ${
-                                categoryColor === colorOption
-                                  ? "border-slate-950 scale-105"
-                                  : "border-white hover:scale-105"
-                              }`}
-                              style={{ backgroundColor: colorOption }}
+                    <div className="flex flex-col gap-5">
+                      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3">
+                            <span
+                              className="h-3 w-3 rounded-full"
+                              style={{ backgroundColor: categoryColor }}
                             />
-                          ))}
+                            <input
+                              type="text"
+                              value={categoryDraft}
+                              onChange={(event) =>
+                                setDraftCategoryNames((current) => ({
+                                  ...current,
+                                  [category.id]: event.target.value,
+                                }))
+                              }
+                              className="flex-1 rounded-2xl border border-line bg-white px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-slate-400"
+                            />
+                          </div>
+
+                          {category.isFallback ? (
+                            <p className="mt-3 text-sm text-muted">
+                              Built-in default category. It stays available automatically across the app, but you can still customize its color.
+                            </p>
+                          ) : null}
                         </div>
 
-                        {category.isFallback ? (
-                          <p className="mt-3 text-sm text-muted">
-                            Built-in default category. It stays available automatically across the app, but you can still customize its color.
-                          </p>
-                        ) : null}
+                        <div className="flex gap-3">
+                          <button
+                            type="button"
+                            disabled={category.isFallback}
+                            onClick={() => {
+                              clearCategoriesError();
+                              startTransition(async () => {
+                                await renameCategory(category.id, categoryDraft);
+                              });
+                            }}
+                            className="rounded-2xl border border-line bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Rename
+                          </button>
+                          <button
+                            type="button"
+                            disabled={category.isFallback}
+                            onClick={() => {
+                              clearCategoriesError();
+                              startTransition(async () => {
+                                await deleteCategory(category.id);
+                              });
+                            }}
+                            className="rounded-2xl border border-line bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </div>
 
-                      <div className="flex gap-3">
-                        <button
-                          type="button"
-                          disabled={category.isFallback}
-                          onClick={() => {
-                            clearCategoriesError();
-                            startTransition(async () => {
-                              await renameCategory(category.id, categoryDraft);
-                            });
-                          }}
-                          className="rounded-2xl border border-line bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          Rename
-                        </button>
-                        <button
-                          type="button"
-                          disabled={category.isFallback}
-                          onClick={() => {
-                            clearCategoriesError();
-                            startTransition(async () => {
-                              await deleteCategory(category.id);
-                            });
-                          }}
-                          className="rounded-2xl border border-line bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          Delete
-                        </button>
+                      <div className="w-full rounded-2xl border border-white/70 bg-white px-4 py-4">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                            <p className="text-sm font-semibold text-slate-950">
+                              Category color
+                            </p>
+                            <p className="mt-1 text-sm text-muted">
+                              Choose the color used for this category across the dashboard.
+                            </p>
+                          </div>
+                          <span
+                            className="inline-flex items-center rounded-full border border-line px-3 py-1 text-xs font-semibold text-slate-700"
+                            style={{
+                              backgroundColor: `${categoryColor}14`,
+                              color: categoryColor,
+                            }}
+                          >
+                            Active color
+                          </span>
+                        </div>
+
+                        <div className="mt-4 flex min-h-10 w-full flex-wrap items-center gap-2.5">
+                          {categoryColorOptions.map((colorOption) => {
+                            const isSelected = categoryColor === colorOption;
+
+                            return (
+                              <button
+                                key={colorOption}
+                                type="button"
+                                aria-label={`Set ${category.name} color to ${colorOption}`}
+                                title={colorOption}
+                                onClick={() => {
+                                  clearPreferencesError();
+                                  startTransition(async () => {
+                                    await saveCategoryColor(category.id, colorOption);
+                                  });
+                                }}
+                                className={`relative inline-flex h-10 w-10 flex-none items-center justify-center rounded-full transition ${
+                                  isSelected
+                                    ? "ring-2 ring-slate-950 ring-offset-2 ring-offset-white"
+                                    : "hover:scale-[1.04]"
+                                }`}
+                                style={{
+                                  backgroundColor: colorOption,
+                                  boxShadow: isSelected
+                                    ? "0 10px 20px rgba(15,23,42,0.16)"
+                                    : "0 6px 14px rgba(15,23,42,0.08)",
+                                }}
+                              >
+                                {isSelected ? (
+                                  <span className="pointer-events-none text-sm font-black text-white drop-shadow-[0_1px_2px_rgba(15,23,42,0.45)]">
+                                    ✓
+                                  </span>
+                                ) : null}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
                     </div>
 
