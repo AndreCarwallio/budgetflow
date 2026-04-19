@@ -10,9 +10,19 @@ export async function resetUserData(
     supabase.from("subcategories").delete().eq("user_id", userId),
     supabase.from("categories").delete().eq("user_id", userId),
     supabase.from("app_preferences").delete().eq("user_id", userId),
+    supabase.from("app_settings").delete().eq("user_id", userId),
+    supabase.from("monthly_snapshots").delete().eq("user_id", userId),
   ];
 
-  const [transactionsResult, budgetsResult, subcategoriesResult, categoriesResult, preferencesResult] =
+  const [
+    transactionsResult,
+    budgetsResult,
+    subcategoriesResult,
+    categoriesResult,
+    preferencesResult,
+    appSettingsResult,
+    monthlySnapshotsResult,
+  ] =
     await Promise.all(tableDeletes);
 
   const errors = [
@@ -21,6 +31,8 @@ export async function resetUserData(
     subcategoriesResult.error,
     categoriesResult.error,
     preferencesResult.error,
+    appSettingsResult.error,
+    monthlySnapshotsResult.error,
   ].filter(Boolean);
 
   if (errors.length > 0) {

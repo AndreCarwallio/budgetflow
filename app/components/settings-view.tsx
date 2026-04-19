@@ -1,27 +1,43 @@
 "use client";
 
-import { type ReactNode, useMemo, useState, useTransition } from "react";
+import Link from "next/link";
+import { type ReactNode, useEffect, useMemo, useState, useTransition } from "react";
 import { categoryColorOptions, chartPalettes } from "../lib/transactions";
 import { useTransactions } from "./transactions-provider";
 
-function SectionCard({
+function AccordionSection({
   title,
   description,
   children,
+  isOpen,
+  onToggle,
 }: {
   title: string;
   description: string;
   children: ReactNode;
+  isOpen: boolean;
+  onToggle: () => void;
 }) {
   return (
     <section className="rounded-[28px] border border-line bg-surface p-6 shadow-[0_18px_40px_rgba(15,23,42,0.05)]">
-      <div className="border-b border-line pb-5">
-        <h2 className="text-xl font-semibold tracking-tight text-slate-950">
-          {title}
-        </h2>
-        <p className="mt-1 text-sm text-muted">{description}</p>
-      </div>
-      <div className="mt-6">{children}</div>
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-start justify-between gap-4 text-left"
+      >
+        <div>
+          <h2 className="text-xl font-semibold tracking-tight text-slate-950">
+            {title}
+          </h2>
+          <p className="mt-1 text-sm text-muted">{description}</p>
+        </div>
+        <span className="mt-1 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+          {isOpen ? "Hide" : "Show"}
+        </span>
+      </button>
+      {isOpen ? (
+        <div className="mt-6 border-t border-line pt-6">{children}</div>
+      ) : null}
     </section>
   );
 }
@@ -30,16 +46,21 @@ export function SettingsView() {
   const {
     addCategory,
     addSubcategory,
+    appSettings,
+    appSettingsError,
     categories,
     categoriesError,
     chartPalette,
+    clearAppSettingsError,
     clearCategoriesError,
     clearPreferencesError,
     deleteCategory,
     deleteSubcategory,
     getSubcategoriesForCategory,
     getCategoryColor,
+    hasLoadedAppSettings,
     hasLoadedCategories,
+    isAppSettingsLoading,
     isCategoriesLoading,
     isPreferencesLoading,
     isResettingUserData,
@@ -49,6 +70,7 @@ export function SettingsView() {
     resetUserData,
     saveCategoryColor,
     saveChartPalette,
+    saveAppSettings,
     currencySymbol,
   } = useTransactions();
   const [newCategoryName, setNewCategoryName] = useState("");
@@ -65,6 +87,33 @@ export function SettingsView() {
   const [resetConfirmation, setResetConfirmation] = useState("");
   const [resetSuccessMessage, setResetSuccessMessage] = useState("");
   const [isPending, startTransition] = useTransition();
+  const [resetPeriodMode, setResetPeriodMode] = useState(
+    appSettings?.resetPeriodMode ?? "monthly"
+  );
+  const [customResetDay, setCustomResetDay] = useState(
+    `${appSettings?.customResetDay ?? 1}`
+  );
+  const [customResetHour, setCustomResetHour] = useState(
+    `${appSettings?.customResetHour ?? 0}`
+  );
+  const [customResetMinute, setCustomResetMinute] = useState(
+    `${appSettings?.customResetMinute ?? 0}`
+  );
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({
+    reset: false,
+    categories: false,
+    appearance: false,
+    savings: false,
+    account: false,
+    data: false,
+  });
+
+  useEffect(() => {
+    setResetPeriodMode(appSettings?.resetPeriodMode ?? "monthly");
+    setCustomResetDay(`${appSettings?.customResetDay ?? 1}`);
+    setCustomResetHour(`${appSettings?.customResetHour ?? 0}`);
+    setCustomResetMinute(`${appSettings?.customResetMinute ?? 0}`);
+  }, [appSettings]);
 
   const currentPalette = useMemo(
     () =>
@@ -81,12 +130,167 @@ export function SettingsView() {
   );
   const customCategoryCount = categories.filter((category) => !category.isFallback).length;
 
+  function toggleSection(sectionId: keyof typeof openSections) {
+    setOpenSections((current) => ({
+      ...current,
+      [sectionId]: !current[sectionId],
+    }));
+  }
+
   return (
     <>
       <section className="space-y-6">
-        <SectionCard
+        <AccordionSection
+          title="Reset Period / Initialization"
+          description="Control how live budgeting periods roll forward into locked snapshots."
+          isOpen={openSections.reset}
+          onToggle={() => toggleSection("reset")}
+        >
+          {appSettingsError ? (
+            <div className="rounded-2xl bg-rose-50 px-4 py-4 text-sm text-rose-700">
+              {appSettingsError}
+            </div>
+          ) : null}
+
+          {isAppSettingsLoading ? (
+            <div className="rounded-2xl bg-slate-50 px-4 py-10 text-center text-sm text-muted">
+              Loading reset period settings...
+            </div>
+          ) : (
+            <form
+              className="space-y-5"
+              onSubmit={(event) => {
+                event.preventDefault();
+                clearAppSettingsError();
+
+                startTransition(async () => {
+                  await saveAppSettings({
+                    resetPeriodMode,
+                    customResetDay:
+                      resetPeriodMode === "custom"
+                        ? Number.parseInt(customResetDay, 10)
+                        : null,
+                    customResetHour:
+                      resetPeriodMode === "custom"
+                        ? Number.parseInt(customResetHour, 10)
+                        : null,
+                    customResetMinute:
+                      resetPeriodMode === "custom"
+                        ? Number.parseInt(customResetMinute, 10)
+                        : null,
+                  });
+                });
+              }}
+            >
+              <div className="grid gap-3 lg:grid-cols-3">
+                {[
+                  {
+                    id: "monthly",
+                    title: "Monthly",
+                    description: "Roll over automatically at the start of each new month.",
+                  },
+                  {
+                    id: "custom",
+                    title: "Custom",
+                    description: "Use your own monthly reset day and time from these settings.",
+                  },
+                  {
+                    id: "never",
+                    title: "Never",
+                    description: "Keep one live period and do not auto-create rollover snapshots.",
+                  },
+                ].map((mode) => {
+                  const isActive = resetPeriodMode === mode.id;
+
+                  return (
+                    <button
+                      key={mode.id}
+                      type="button"
+                      onClick={() => setResetPeriodMode(mode.id as typeof resetPeriodMode)}
+                      className={`rounded-2xl border px-4 py-4 text-left transition ${
+                        isActive
+                          ? "border-slate-950 bg-slate-50 shadow-sm"
+                          : "border-line bg-white hover:border-slate-300"
+                      }`}
+                    >
+                      <p className="font-semibold text-slate-950">{mode.title}</p>
+                      <p className="mt-2 text-sm text-muted">{mode.description}</p>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {resetPeriodMode === "custom" ? (
+                <div className="grid gap-4 rounded-2xl bg-slate-50 px-4 py-4 md:grid-cols-3">
+                  <label className="space-y-2">
+                    <span className="text-sm font-medium text-slate-700">
+                      Reset day
+                    </span>
+                    <input
+                      min="1"
+                      max="31"
+                      step="1"
+                      type="number"
+                      value={customResetDay}
+                      onChange={(event) => setCustomResetDay(event.target.value)}
+                      className="w-full rounded-2xl border border-line bg-white px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-slate-400"
+                    />
+                  </label>
+                  <label className="space-y-2">
+                    <span className="text-sm font-medium text-slate-700">
+                      Reset hour
+                    </span>
+                    <input
+                      min="0"
+                      max="23"
+                      step="1"
+                      type="number"
+                      value={customResetHour}
+                      onChange={(event) => setCustomResetHour(event.target.value)}
+                      className="w-full rounded-2xl border border-line bg-white px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-slate-400"
+                    />
+                  </label>
+                  <label className="space-y-2">
+                    <span className="text-sm font-medium text-slate-700">
+                      Reset minute
+                    </span>
+                    <input
+                      min="0"
+                      max="59"
+                      step="1"
+                      type="number"
+                      value={customResetMinute}
+                      onChange={(event) => setCustomResetMinute(event.target.value)}
+                      className="w-full rounded-2xl border border-line bg-white px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-slate-400"
+                    />
+                  </label>
+                </div>
+              ) : null}
+
+              <div className="rounded-2xl bg-slate-50 px-4 py-4 text-sm text-muted">
+                {hasLoadedAppSettings
+                  ? "When the app detects that the active period changed, it saves one locked snapshot for each completed period that does not already exist."
+                  : "Reset period settings will appear here once loaded."}
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  disabled={isPending}
+                  className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-700"
+                >
+                  Save reset period
+                </button>
+              </div>
+            </form>
+          )}
+        </AccordionSection>
+
+        <AccordionSection
           title="Category Management"
           description="Manage categories, subcategories, and the colors used across your dashboard."
+          isOpen={openSections.categories}
+          onToggle={() => toggleSection("categories")}
         >
           <form
             className="flex flex-col gap-3 sm:flex-row"
@@ -383,15 +587,16 @@ export function SettingsView() {
               })
             )}
           </div>
-        </SectionCard>
+        </AccordionSection>
 
-        <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-          <SectionCard
-            title="Appearance / Colors"
-            description="Choose the chart palette used across the dashboard and fine-tune category colors."
-          >
-            {preferencesError ? (
-              <div className="rounded-2xl bg-rose-50 px-4 py-4 text-sm text-rose-700">
+        <AccordionSection
+          title="Appearance / Colors"
+          description="Choose the chart palette used across the dashboard and fine-tune category colors."
+          isOpen={openSections.appearance}
+          onToggle={() => toggleSection("appearance")}
+        >
+          {preferencesError ? (
+            <div className="rounded-2xl bg-rose-50 px-4 py-4 text-sm text-rose-700">
                 {preferencesError}
               </div>
             ) : null}
@@ -443,14 +648,35 @@ export function SettingsView() {
                 })}
               </div>
             )}
-          </SectionCard>
+        </AccordionSection>
 
-          <SectionCard
-            title="Account / App Preferences"
-            description="A quick summary of the active experience and settings for this signed-in workspace."
-          >
-            <div className="space-y-4">
-              <div className="rounded-2xl bg-slate-50 px-4 py-4">
+        <AccordionSection
+          title="Savings Settings"
+          description="Open the dedicated Savings page to manage your savings plan and related controls."
+          isOpen={openSections.savings}
+          onToggle={() => toggleSection("savings")}
+        >
+          <div className="rounded-2xl bg-slate-50 px-5 py-5">
+            <p className="text-sm text-muted">
+              Savings management has moved to its own page so the dashboard stays display-only. Use the Savings page to edit starting savings, target savings, and reset the savings plan.
+            </p>
+            <Link
+              href="/savings"
+              className="mt-4 inline-flex rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
+            >
+              Open Savings
+            </Link>
+          </div>
+        </AccordionSection>
+
+        <AccordionSection
+          title="Account / App Preferences"
+          description="A quick summary of the active experience and settings for this signed-in workspace."
+          isOpen={openSections.account}
+          onToggle={() => toggleSection("account")}
+        >
+          <div className="space-y-4">
+            <div className="rounded-2xl bg-slate-50 px-4 py-4">
                 <p className="text-sm font-semibold text-slate-950">Currency display</p>
                 <p className="mt-1 text-sm text-muted">
                   Currently showing amounts in <span className="font-medium text-slate-900">{currencySymbol}</span>. Change it anytime from the header toggle.
@@ -488,15 +714,16 @@ export function SettingsView() {
                   <p className="mt-2 text-2xl font-semibold text-slate-950">
                     {subcategoryCount}
                   </p>
-                </div>
               </div>
             </div>
-          </SectionCard>
-        </div>
+          </div>
+        </AccordionSection>
 
-        <SectionCard
+        <AccordionSection
           title="Data & Reset"
           description="Reset only this user’s budgeting data while keeping auth access and the app shell intact."
+          isOpen={openSections.data}
+          onToggle={() => toggleSection("data")}
         >
           {resetSuccessMessage ? (
             <div className="rounded-2xl bg-emerald-50 px-4 py-4 text-sm text-emerald-700">
@@ -507,7 +734,7 @@ export function SettingsView() {
           <div className="rounded-2xl border border-rose-200 bg-rose-50 px-5 py-5">
             <p className="text-sm font-semibold text-rose-900">Danger zone</p>
             <p className="mt-2 text-sm leading-6 text-rose-800">
-              Resetting data deletes this account&apos;s transactions, budgets, savings goal, custom categories, subcategories, and appearance preferences. It does not delete the auth account, and default categories remain available afterward.
+              Resetting data deletes this account&apos;s transactions, budgets, savings goal, reset period settings, snapshot history, custom categories, subcategories, and appearance preferences. It does not delete the auth account, and default categories remain available afterward.
             </p>
             <button
               type="button"
@@ -522,7 +749,7 @@ export function SettingsView() {
               Reset data
             </button>
           </div>
-        </SectionCard>
+        </AccordionSection>
       </section>
 
       {isResetModalOpen ? (
@@ -537,7 +764,7 @@ export function SettingsView() {
                   Confirm data reset
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-muted">
-                  This permanently removes only this user&apos;s transactions, budgets, savings goal, custom categories, subcategories, and chart preferences. Type <span className="font-semibold text-slate-950">RESET</span> to continue.
+                  This permanently removes only this user&apos;s transactions, budgets, savings goal, reset period settings, snapshot history, custom categories, subcategories, and chart preferences. Type <span className="font-semibold text-slate-950">RESET</span> to continue.
                 </p>
               </div>
               <button

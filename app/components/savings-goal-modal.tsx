@@ -14,7 +14,7 @@ function SavingsGoalModalForm() {
   const [targetAmount, setTargetAmount] = useState(
     savingsGoal ? `${savingsGoal.targetAmount.toFixed(2)}` : ""
   );
-  const [currentAmount, setCurrentAmount] = useState(
+  const [startingAmount, setStartingAmount] = useState(
     savingsGoal ? `${savingsGoal.currentAmount.toFixed(2)}` : ""
   );
   const [isPending, startTransition] = useTransition();
@@ -29,7 +29,7 @@ function SavingsGoalModalForm() {
         startTransition(async () => {
           await saveSavingsGoal({
             targetAmount: Number.parseFloat(targetAmount),
-            currentAmount: Number.parseFloat(currentAmount),
+            currentAmount: Number.parseFloat(startingAmount),
           });
         });
       }}
@@ -52,16 +52,16 @@ function SavingsGoalModalForm() {
 
       <label className="space-y-2">
         <span className="text-sm font-medium text-slate-700">
-          Base savings amount
+          Starting savings
         </span>
         <input
           required
           min="0"
           step="0.01"
           type="number"
-          value={currentAmount}
-          onChange={(event) => setCurrentAmount(event.target.value)}
-          placeholder="Enter existing savings amount"
+          value={startingAmount}
+          onChange={(event) => setStartingAmount(event.target.value)}
+          placeholder="Enter starting savings"
           className="w-full rounded-2xl border border-line bg-surface px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-slate-400"
         />
       </label>
@@ -120,10 +120,10 @@ export function SavingsGoalModal() {
               BudgetFlow
             </p>
             <h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
-              {savingsGoal ? "Update savings goal" : "Create savings goal"}
+              {savingsGoal ? "Update savings plan" : "Create savings plan"}
             </h2>
             <p className="mt-2 text-sm text-muted">
-              Set your goal target and your existing savings. The dashboard will add this month&apos;s remaining balance automatically.
+              Set your target savings and starting savings. The dashboard calculates total savings by applying the current month net change automatically.
             </p>
           </div>
           <button

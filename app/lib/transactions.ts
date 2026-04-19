@@ -47,6 +47,67 @@ export type SavingsGoal = {
   createdAt: string;
 };
 
+export type ResetPeriodMode = "monthly" | "custom" | "never";
+
+export type AppSettings = {
+  id: string;
+  userId: string;
+  resetPeriodMode: ResetPeriodMode;
+  customResetDay: number | null;
+  customResetHour: number | null;
+  customResetMinute: number | null;
+  lastPeriodKey: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SnapshotBudgetUsage = {
+  category: string;
+  monthlyLimit: number;
+  usedAmount: number;
+  usagePercentage: number;
+};
+
+export type SnapshotTransactionSummary = {
+  id: string;
+  type: TransactionType;
+  amount: number;
+  category: TransactionCategory;
+  subcategory: string | null;
+  date: string;
+  note: string;
+};
+
+export type SnapshotAdjustment = {
+  adjustedAt: string;
+  note: string;
+};
+
+export type MonthlySnapshotData = {
+  periodLabel: string;
+  periodStart: string;
+  periodEnd: string;
+  categoryTotals: Record<string, number>;
+  budgetUsageSummary: SnapshotBudgetUsage[];
+  recentTransactions: SnapshotTransactionSummary[];
+  adjustment?: SnapshotAdjustment;
+};
+
+export type MonthlySnapshot = {
+  id: string;
+  userId: string;
+  periodKey: string;
+  incomeTotal: number;
+  expenseTotal: number;
+  netChange: number;
+  savingsTotal: number;
+  targetSavings: number;
+  startingSavings: number;
+  snapshotData: MonthlySnapshotData;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type ChartPalette = "ocean" | "sunset" | "forest" | "mono";
 
 export type ChartPaletteConfig = {

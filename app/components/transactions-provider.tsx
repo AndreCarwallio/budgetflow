@@ -7,8 +7,29 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
+import {
+  ensureAppSettings,
+  fetchAppSettings,
+  getDefaultAppSettings,
+  upsertAppSettings,
+  type AppSettingsPayload,
+} from "../lib/app-settings-api";
+import {
+  getBudgetUsageSummaryForTransactions,
+  getCategorySpending,
+  getIncomeExpensesForTransactions,
+  getTransactionsInRange,
+} from "../lib/dashboard-metrics";
+import {
+  fetchMonthlySnapshots,
+  updateMonthlySnapshot,
+  upsertMonthlySnapshot,
+  type MonthlySnapshotPayload,
+} from "../lib/monthly-snapshots-api";
+import { getActivePeriod, getNextPeriod, parsePeriodKey } from "../lib/periods";
 import { createClient } from "../lib/supabase/client";
 import {
   createBudget,
@@ -49,9 +70,13 @@ import {
   defaultCategoryColors,
   defaultTransactionCategories,
   initialBudgets,
+  type AppSettings,
   type Budget,
   type Category,
   type ChartPalette,
+  type MonthlySnapshot,
+  type MonthlySnapshotData,
+  type ResetPeriodMode,
   type SavingsGoal,
   type Subcategory,
   type Transaction,
@@ -124,6 +149,60 @@ function readStoredJSON<T>(key: string): T | null {
   }
 }
 
+type AppSettingsInput = {
+  resetPeriodMode: ResetPeriodMode;
+  customResetDay: number | null;
+  customResetHour: number | null;
+  customResetMinute: number | null;
+};
+
+type SnapshotAdjustmentInput = {
+  startingSavings: number;
+  incomeTotal: number;
+  expenseTotal: number;
+  targetSavings: number;
+};
+
+function buildSnapshotData(
+  periodLabel: string,
+  periodStart: Date,
+  periodEndExclusive: Date,
+  periodTransactions: Transaction[],
+  budgets: Budget[],
+  previousSnapshotData?: MonthlySnapshotData
+): MonthlySnapshotData {
+  const recentTransactions = [...periodTransactions]
+    .sort((left, right) => right.date.localeCompare(left.date))
+    .slice(0, 5)
+    .map((transaction) => ({
+      id: transaction.id,
+      type: transaction.type,
+      amount: transaction.amount,
+      category: transaction.category,
+      subcategory: transaction.subcategory,
+      date: transaction.date,
+      note: transaction.note,
+    }));
+
+  return {
+    periodLabel,
+    periodStart: periodStart.toISOString(),
+    periodEnd: new Date(periodEndExclusive.getTime() - 1).toISOString(),
+    categoryTotals: previousSnapshotData?.categoryTotals ?? getCategorySpending(periodTransactions),
+    budgetUsageSummary:
+      previousSnapshotData?.budgetUsageSummary ??
+      getBudgetUsageSummaryForTransactions(budgets, periodTransactions).map((budget) => ({
+        category: budget.category,
+        monthlyLimit: budget.monthlyLimit,
+        usedAmount: budget.usedAmount,
+        usagePercentage: budget.usagePercentage,
+      })),
+    recentTransactions:
+      previousSnapshotData?.recentTransactions ?? recentTransactions,
+    adjustment: previousSnapshotData?.adjustment,
+  };
+}
+
 type NewTransactionInput = {
   type: TransactionType;
   amount: number;
@@ -156,6 +235,8 @@ type TransactionsContextValue = {
   transactions: Transaction[];
   budgets: Budget[];
   savingsGoal: SavingsGoal | null;
+  appSettings: AppSettings | null;
+  monthlySnapshots: MonthlySnapshot[];
   categories: Category[];
   subcategories: Subcategory[];
   addTransaction: (input: NewTransactionInput) => Promise<boolean>;
@@ -164,6 +245,11 @@ type TransactionsContextValue = {
   deleteBudget: (id: string) => Promise<void>;
   saveSavingsGoal: (input: SavingsGoalInput) => Promise<boolean>;
   deleteSavingsGoal: () => Promise<void>;
+  saveAppSettings: (input: AppSettingsInput) => Promise<boolean>;
+  adjustMonthlySnapshot: (
+    snapshotId: string,
+    input: SnapshotAdjustmentInput
+  ) => Promise<boolean>;
   addCategory: (input: CategoryInput) => Promise<string | null>;
   renameCategory: (categoryId: string, nextName: string) => Promise<boolean>;
   deleteCategory: (categoryId: string) => Promise<void>;
@@ -209,6 +295,17 @@ type TransactionsContextValue = {
   isPreferencesLoading: boolean;
   preferencesError: string;
   clearPreferencesError: () => void;
+  isAppSettingsLoading: boolean;
+  appSettingsError: string;
+  clearAppSettingsError: () => void;
+  hasLoadedAppSettings: boolean;
+  isMonthlySnapshotsLoading: boolean;
+  monthlySnapshotsError: string;
+  clearMonthlySnapshotsError: () => void;
+  hasLoadedMonthlySnapshots: boolean;
+  isRolloverPending: boolean;
+  rolloverError: string;
+  clearRolloverError: () => void;
   resetUserData: () => Promise<boolean>;
   isResettingUserData: boolean;
 };
@@ -226,6 +323,8 @@ export function TransactionsProvider({
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>(initialBudgets);
   const [savingsGoal, setSavingsGoal] = useState<SavingsGoal | null>(null);
+  const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+  const [monthlySnapshots, setMonthlySnapshots] = useState<MonthlySnapshot[]>([]);
   const [categories, setCategories] = useState<Category[]>(
     userId ? createDefaultCategories(userId) : []
   );
@@ -249,7 +348,17 @@ export function TransactionsProvider({
   const [preferences, setPreferences] = useState<AppPreferences | null>(null);
   const [isPreferencesLoading, setIsPreferencesLoading] = useState(true);
   const [preferencesError, setPreferencesError] = useState("");
+  const [isAppSettingsLoading, setIsAppSettingsLoading] = useState(true);
+  const [hasLoadedAppSettings, setHasLoadedAppSettings] = useState(false);
+  const [appSettingsError, setAppSettingsError] = useState("");
+  const [isMonthlySnapshotsLoading, setIsMonthlySnapshotsLoading] = useState(true);
+  const [hasLoadedMonthlySnapshots, setHasLoadedMonthlySnapshots] = useState(false);
+  const [monthlySnapshotsError, setMonthlySnapshotsError] = useState("");
+  const [isRolloverPending, setIsRolloverPending] = useState(false);
+  const [rolloverError, setRolloverError] = useState("");
   const [isResettingUserData, setIsResettingUserData] = useState(false);
+  const isHandlingRolloverRef = useRef(false);
+  const lastRolloverAttemptKeyRef = useRef<string | null>(null);
   const [currencySymbol, setCurrencySymbol] = useState<"$" | "Rs">(() => {
     const storedCurrencySymbol = readStoredJSON<"$" | "Rs">(
       CURRENCY_STORAGE_KEY
@@ -288,6 +397,30 @@ export function TransactionsProvider({
 
     const loadedSavingsGoal = await fetchSavingsGoal(supabase, userId);
     setSavingsGoal(loadedSavingsGoal);
+  }, [supabase, userId]);
+
+  const refreshAppSettings = useCallback(async () => {
+    if (!userId) {
+      setAppSettings(null);
+      return;
+    }
+
+    try {
+      const loadedAppSettings = await ensureAppSettings(supabase, userId);
+      setAppSettings(loadedAppSettings);
+    } catch {
+      setAppSettings(getDefaultAppSettings(userId));
+    }
+  }, [supabase, userId]);
+
+  const refreshMonthlySnapshots = useCallback(async () => {
+    if (!userId) {
+      setMonthlySnapshots([]);
+      return;
+    }
+
+    const loadedMonthlySnapshots = await fetchMonthlySnapshots(supabase, userId);
+    setMonthlySnapshots(loadedMonthlySnapshots);
   }, [supabase, userId]);
 
   const refreshCategories = useCallback(async () => {
@@ -593,6 +726,93 @@ export function TransactionsProvider({
   }, [supabase, userId]);
 
   useEffect(() => {
+    let isActive = true;
+
+    async function loadAppSettings() {
+      if (!userId) {
+        if (isActive) {
+          setAppSettings(null);
+          setIsAppSettingsLoading(false);
+          setHasLoadedAppSettings(true);
+        }
+        return;
+      }
+
+      setIsAppSettingsLoading(true);
+      setAppSettingsError("");
+
+      try {
+        const loadedAppSettings = await ensureAppSettings(supabase, userId);
+
+        if (isActive) {
+          setAppSettings(loadedAppSettings);
+        }
+      } catch (error) {
+        if (isActive) {
+          setAppSettings(getDefaultAppSettings(userId));
+          setAppSettingsError("");
+        }
+      } finally {
+        if (isActive) {
+          setIsAppSettingsLoading(false);
+          setHasLoadedAppSettings(true);
+        }
+      }
+    }
+
+    void loadAppSettings();
+
+    return () => {
+      isActive = false;
+    };
+  }, [supabase, userId]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    async function loadMonthlySnapshots() {
+      if (!userId) {
+        if (isActive) {
+          setMonthlySnapshots([]);
+          setIsMonthlySnapshotsLoading(false);
+          setHasLoadedMonthlySnapshots(true);
+        }
+        return;
+      }
+
+      setIsMonthlySnapshotsLoading(true);
+      setMonthlySnapshotsError("");
+
+      try {
+        const loadedMonthlySnapshots = await fetchMonthlySnapshots(supabase, userId);
+
+        if (isActive) {
+          setMonthlySnapshots(loadedMonthlySnapshots);
+        }
+      } catch (error) {
+        if (isActive) {
+          setMonthlySnapshotsError(
+            error instanceof Error
+              ? error.message
+              : "Unable to load snapshot history right now."
+          );
+        }
+      } finally {
+        if (isActive) {
+          setIsMonthlySnapshotsLoading(false);
+          setHasLoadedMonthlySnapshots(true);
+        }
+      }
+    }
+
+    void loadMonthlySnapshots();
+
+    return () => {
+      isActive = false;
+    };
+  }, [supabase, userId]);
+
+  useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
@@ -602,6 +822,177 @@ export function TransactionsProvider({
       JSON.stringify(currencySymbol)
     );
   }, [currencySymbol]);
+
+  const activePeriod = getActivePeriod(appSettings);
+  const rolloverCycleKey = [
+    userId,
+    activePeriod.key,
+    appSettings?.lastPeriodKey ?? "null",
+    hasLoadedTransactions ? "tx-ready" : "tx-pending",
+    hasLoadedBudgets ? "budgets-ready" : "budgets-pending",
+    hasLoadedSavingsGoal ? "savings-ready" : "savings-pending",
+    hasLoadedAppSettings ? "settings-ready" : "settings-pending",
+    hasLoadedMonthlySnapshots ? "snapshots-ready" : "snapshots-pending",
+  ].join("|");
+
+  useEffect(() => {
+    if (
+      !userId ||
+      isHandlingRolloverRef.current ||
+      isTransactionsLoading ||
+      isBudgetsLoading ||
+      isSavingsGoalLoading ||
+      isAppSettingsLoading ||
+      isMonthlySnapshotsLoading
+    ) {
+      return;
+    }
+
+    if (
+      !hasLoadedTransactions ||
+      !hasLoadedBudgets ||
+      !hasLoadedSavingsGoal ||
+      !hasLoadedAppSettings ||
+      !hasLoadedMonthlySnapshots
+    ) {
+      return;
+    }
+
+    if (lastRolloverAttemptKeyRef.current === rolloverCycleKey) {
+      return;
+    }
+
+    async function ensureRollover() {
+      isHandlingRolloverRef.current = true;
+      lastRolloverAttemptKeyRef.current = rolloverCycleKey;
+      setIsRolloverPending(true);
+      setRolloverError("");
+
+      try {
+        if (activePeriod.mode === "never") {
+          if (appSettings?.lastPeriodKey !== "never") {
+            await upsertAppSettings(supabase, userId, {
+              resetPeriodMode: appSettings?.resetPeriodMode ?? "never",
+              customResetDay: appSettings?.customResetDay ?? null,
+              customResetHour: appSettings?.customResetHour ?? null,
+              customResetMinute: appSettings?.customResetMinute ?? null,
+              lastPeriodKey: "never",
+            });
+            await refreshAppSettings();
+          }
+
+          return;
+        }
+
+        const currentSettingsPayload: Partial<AppSettingsPayload> = {
+          resetPeriodMode: appSettings?.resetPeriodMode ?? "monthly",
+          customResetDay: appSettings?.customResetDay ?? null,
+          customResetHour: appSettings?.customResetHour ?? null,
+          customResetMinute: appSettings?.customResetMinute ?? null,
+        };
+
+        if (!appSettings?.lastPeriodKey) {
+          await upsertAppSettings(supabase, userId, {
+            ...currentSettingsPayload,
+            lastPeriodKey: activePeriod.key,
+          });
+          await refreshAppSettings();
+          return;
+        }
+
+        if (appSettings.lastPeriodKey === activePeriod.key) {
+          return;
+        }
+
+        let period = parsePeriodKey(appSettings.lastPeriodKey, appSettings);
+        let previousSavingsTotal =
+          monthlySnapshots.length > 0
+            ? monthlySnapshots[monthlySnapshots.length - 1]?.savingsTotal ??
+              savingsGoal?.currentAmount ??
+              0
+            : savingsGoal?.currentAmount ?? 0;
+
+        while (period.start < activePeriod.start) {
+          const existingSnapshot = monthlySnapshots.find(
+            (snapshot) => snapshot.periodKey === period.key
+          );
+
+          if (!existingSnapshot) {
+            const periodTransactions = getTransactionsInRange(
+              transactions,
+              period.start,
+              period.endExclusive
+            );
+            const { income, expenses, remainingBalance } =
+              getIncomeExpensesForTransactions(periodTransactions);
+            const savingsTotal = previousSavingsTotal + remainingBalance;
+            const payload: MonthlySnapshotPayload = {
+              periodKey: period.key,
+              incomeTotal: income,
+              expenseTotal: expenses,
+              netChange: remainingBalance,
+              savingsTotal,
+              targetSavings: savingsGoal?.targetAmount ?? 0,
+              startingSavings: previousSavingsTotal,
+              snapshotData: buildSnapshotData(
+                period.label,
+                period.start,
+                period.endExclusive,
+                periodTransactions,
+                budgets
+              ),
+            };
+
+            await upsertMonthlySnapshot(supabase, userId, payload);
+            previousSavingsTotal = savingsTotal;
+          } else {
+            previousSavingsTotal = existingSnapshot.savingsTotal;
+          }
+
+          period = getNextPeriod(period, appSettings);
+        }
+
+        await upsertAppSettings(supabase, userId, {
+          ...currentSettingsPayload,
+          lastPeriodKey: activePeriod.key,
+        });
+        await Promise.all([refreshMonthlySnapshots(), refreshAppSettings()]);
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Unable to finalize snapshot rollover right now.";
+        setRolloverError(message);
+      } finally {
+        setIsRolloverPending(false);
+        isHandlingRolloverRef.current = false;
+      }
+    }
+
+    void ensureRollover();
+  }, [
+    activePeriod,
+    appSettings,
+    budgets,
+    hasLoadedAppSettings,
+    hasLoadedBudgets,
+    hasLoadedMonthlySnapshots,
+    hasLoadedSavingsGoal,
+    hasLoadedTransactions,
+    isAppSettingsLoading,
+    isBudgetsLoading,
+    isMonthlySnapshotsLoading,
+    isSavingsGoalLoading,
+    isTransactionsLoading,
+    monthlySnapshots,
+    refreshAppSettings,
+    refreshMonthlySnapshots,
+    savingsGoal,
+    supabase,
+    transactions,
+    userId,
+    rolloverCycleKey,
+  ]);
 
   const chartPalette = preferences?.chartPalette ?? DEFAULT_CHART_PALETTE;
   const getCategoryColor = useCallback(
@@ -616,6 +1007,8 @@ export function TransactionsProvider({
       transactions,
       budgets,
       savingsGoal,
+      appSettings,
+      monthlySnapshots,
       categories,
       subcategories,
       addTransaction: async (input) => {
@@ -760,6 +1153,112 @@ export function TransactionsProvider({
               ? error.message
               : "Unable to reset your savings goal right now."
           );
+        }
+      },
+      saveAppSettings: async (input) => {
+        if (!userId) {
+          setAppSettingsError("You must be logged in to manage reset period settings.");
+          return false;
+        }
+
+        setAppSettingsError("");
+        setRolloverError("");
+        lastRolloverAttemptKeyRef.current = null;
+
+        try {
+          await upsertAppSettings(supabase, userId, {
+            resetPeriodMode: input.resetPeriodMode,
+            customResetDay: input.customResetDay,
+            customResetHour: input.customResetHour,
+            customResetMinute: input.customResetMinute,
+            lastPeriodKey: null,
+          });
+          await refreshAppSettings();
+          return true;
+        } catch (error) {
+          setAppSettingsError(
+            error instanceof Error
+              ? error.message
+              : "Unable to save reset period settings right now."
+          );
+          return false;
+        }
+      },
+      adjustMonthlySnapshot: async (snapshotId, input) => {
+        if (!userId) {
+          setMonthlySnapshotsError("You must be logged in to adjust snapshot history.");
+          return false;
+        }
+
+        const orderedSnapshots = [...monthlySnapshots].sort((left, right) =>
+          left.periodKey.localeCompare(right.periodKey)
+        );
+        const snapshotIndex = orderedSnapshots.findIndex(
+          (snapshot) => snapshot.id === snapshotId
+        );
+
+        if (snapshotIndex < 0) {
+          setMonthlySnapshotsError("Snapshot not found.");
+          return false;
+        }
+
+        setMonthlySnapshotsError("");
+
+        try {
+          let previousSavingsTotal =
+            snapshotIndex > 0
+              ? orderedSnapshots[snapshotIndex - 1]?.savingsTotal ?? 0
+              : input.startingSavings;
+
+          for (let index = snapshotIndex; index < orderedSnapshots.length; index += 1) {
+            const snapshot = orderedSnapshots[index];
+            const isAdjustedSnapshot = index === snapshotIndex;
+            const startingSavings = isAdjustedSnapshot
+              ? input.startingSavings
+              : previousSavingsTotal;
+            const incomeTotal = isAdjustedSnapshot
+              ? input.incomeTotal
+              : snapshot.incomeTotal;
+            const expenseTotal = isAdjustedSnapshot
+              ? input.expenseTotal
+              : snapshot.expenseTotal;
+            const targetSavings = isAdjustedSnapshot
+              ? input.targetSavings
+              : snapshot.targetSavings;
+            const netChange = incomeTotal - expenseTotal;
+            const savingsTotal = startingSavings + netChange;
+            const nextSnapshotData: MonthlySnapshotData = {
+              ...snapshot.snapshotData,
+              adjustment: isAdjustedSnapshot
+                ? {
+                    adjustedAt: new Date().toISOString(),
+                    note: "Top-line snapshot totals were adjusted manually. Detailed category and transaction breakdown remain from the original locked snapshot.",
+                  }
+                : snapshot.snapshotData.adjustment,
+            };
+
+            await updateMonthlySnapshot(supabase, userId, snapshot.id, {
+              incomeTotal,
+              expenseTotal,
+              netChange,
+              savingsTotal,
+              targetSavings,
+              startingSavings,
+              snapshotData: nextSnapshotData,
+            });
+
+            previousSavingsTotal = savingsTotal;
+          }
+
+          await refreshMonthlySnapshots();
+          return true;
+        } catch (error) {
+          setMonthlySnapshotsError(
+            error instanceof Error
+              ? error.message
+              : "Unable to adjust snapshot history right now."
+          );
+          return false;
         }
       },
       addCategory: async ({ name }) => {
@@ -1118,6 +1617,17 @@ export function TransactionsProvider({
       isPreferencesLoading,
       preferencesError,
       clearPreferencesError: () => setPreferencesError(""),
+      isAppSettingsLoading,
+      appSettingsError,
+      clearAppSettingsError: () => setAppSettingsError(""),
+      hasLoadedAppSettings,
+      isMonthlySnapshotsLoading,
+      monthlySnapshotsError,
+      clearMonthlySnapshotsError: () => setMonthlySnapshotsError(""),
+      hasLoadedMonthlySnapshots,
+      isRolloverPending,
+      rolloverError,
+      clearRolloverError: () => setRolloverError(""),
       resetUserData: async () => {
         if (!userId) {
           setPreferencesError("You must be logged in to reset data.");
@@ -1132,6 +1642,8 @@ export function TransactionsProvider({
           setTransactions([]);
           setBudgets([]);
           setSavingsGoal(null);
+          setAppSettings(null);
+          setMonthlySnapshots([]);
           setSubcategories([]);
           setPreferences(null);
           setCategories(createDefaultCategories(userId));
@@ -1142,6 +1654,10 @@ export function TransactionsProvider({
           setTransactionsError("");
           setBudgetsError("");
           setSavingsGoalError("");
+          setAppSettingsError("");
+          setMonthlySnapshotsError("");
+          setRolloverError("");
+          lastRolloverAttemptKeyRef.current = null;
           setCategoriesError("");
           return true;
         } catch (error) {
@@ -1158,6 +1674,8 @@ export function TransactionsProvider({
       isResettingUserData,
     }),
     [
+      appSettings,
+      appSettingsError,
       budgets,
       budgetsError,
       categories,
@@ -1166,23 +1684,33 @@ export function TransactionsProvider({
       currencySymbol,
       editingBudget,
       getCategoryColor,
+      hasLoadedAppSettings,
       hasLoadedBudgets,
       hasLoadedCategories,
+      hasLoadedMonthlySnapshots,
       hasLoadedSavingsGoal,
       hasLoadedTransactions,
       isAddModalOpen,
+      isAppSettingsLoading,
       isBudgetModalOpen,
       isBudgetsLoading,
       isCategoriesLoading,
+      isMonthlySnapshotsLoading,
       isPreferencesLoading,
+      isRolloverPending,
       isResettingUserData,
       isSavingsGoalLoading,
       isSavingsGoalModalOpen,
       isTransactionsLoading,
+      monthlySnapshots,
+      monthlySnapshotsError,
       preferencesError,
+      rolloverError,
+      refreshAppSettings,
       refreshBudgets,
       refreshCategories,
       refreshCategoriesDependencies,
+      refreshMonthlySnapshots,
       refreshPreferences,
       refreshSavingsGoal,
       refreshTransactions,

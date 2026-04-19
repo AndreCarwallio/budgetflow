@@ -2,13 +2,15 @@
 
 import { useState } from "react";
 import {
-  getBudgetUsageSummary,
-  getCurrentMonthCategorySpending,
-  getMonthlyIncomeExpenses,
+  getBudgetUsageSummaryForTransactions,
+  getCategorySpending,
+  getIncomeExpensesForTransactions,
   getMonthlySpendingPoints,
   getTotalSavingsValue,
+  getTransactionsInRange,
   getWeeklySpendingPoints,
 } from "../lib/dashboard-metrics";
+import { getActivePeriod } from "../lib/periods";
 import { chartPalettes } from "../lib/transactions";
 import { useTransactions } from "./transactions-provider";
 
@@ -70,15 +72,20 @@ function SummaryCard({
 
 export function DashboardView() {
   const {
+    appSettings,
     budgets,
     hasLoadedBudgets,
+    hasLoadedSavingsGoal,
     currencySymbol,
     hasLoadedTransactions,
     isBudgetsLoading,
+    isSavingsGoalLoading,
     isTransactionsLoading,
     chartPalette,
     getCategoryColor,
+    monthlySnapshots,
     savingsGoal,
+    savingsGoalError,
     transactions,
     transactionsError,
   } = useTransactions();
@@ -86,12 +93,32 @@ export function DashboardView() {
   const [expandedCategories, setExpandedCategories] = useState<
     Record<string, boolean>
   >({});
-  const { expenses, income, monthlyTransactions, remainingBalance } =
-    getMonthlyIncomeExpenses(transactions);
-  const { baseSavingsAmount, totalSavings } = getTotalSavingsValue(
-    savingsGoal,
+  const activePeriod = getActivePeriod(appSettings);
+  const currentPeriodTransactions = getTransactionsInRange(
+    transactions,
+    activePeriod.start,
+    activePeriod.endExclusive
+  );
+  const { expenses, income, remainingBalance } =
+    getIncomeExpensesForTransactions(currentPeriodTransactions);
+  const latestSnapshot =
+    monthlySnapshots.length > 0 ? monthlySnapshots[monthlySnapshots.length - 1] : null;
+  const {
+    totalSavings,
+  } = getTotalSavingsValue(
+    savingsGoal
+      ? {
+          ...savingsGoal,
+          currentAmount: latestSnapshot?.savingsTotal ?? savingsGoal.currentAmount,
+        }
+      : null,
     remainingBalance
   );
+  const targetSavings = savingsGoal?.targetAmount ?? 0;
+  const savingsProgress =
+    targetSavings > 0
+      ? Math.max(0, Math.min((totalSavings / targetSavings) * 100, 100))
+      : 0;
   const recentTransactions = [...transactions]
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, 4);
@@ -102,7 +129,7 @@ export function DashboardView() {
   const maxTrendAmount = Math.max(...trendPoints.map((point) => point.amount), 1);
 
   const breakdown = Object.entries(
-    getCurrentMonthCategorySpending(monthlyTransactions)
+    getCategorySpending(currentPeriodTransactions)
   )
     .sort((a, b) => b[1] - a[1])
     .slice(0, 4);
@@ -110,11 +137,14 @@ export function DashboardView() {
     (sum, [, amount]) => sum + amount,
     0
   );
-  const budgetUsageSummary = getBudgetUsageSummary(budgets, transactions);
+  const budgetUsageSummary = getBudgetUsageSummaryForTransactions(
+    budgets,
+    currentPeriodTransactions
+  );
   const activeChartPalette =
     chartPalettes.find((palette) => palette.id === chartPalette) ??
     chartPalettes[0];
-  const subcategoryBreakdown = monthlyTransactions
+  const subcategoryBreakdown = currentPeriodTransactions
     .filter((transaction) => transaction.type === "expense" && transaction.subcategory)
     .reduce<Record<string, Record<string, number>>>((accumulator, transaction) => {
       const category = transaction.category;
@@ -132,38 +162,98 @@ export function DashboardView() {
 
   return (
     <>
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <SummaryCard
           title="Total Income"
           value={formatCurrency(income, currencySymbol)}
-          detail="Income recorded for the current month"
+          detail="Income recorded for current month"
           tone="bg-emerald-50 text-emerald-700"
           badge="Monthly"
         />
         <SummaryCard
           title="Total Expenses"
           value={formatCurrency(expenses, currencySymbol)}
-          detail="Expense activity recorded this month"
+          detail="Expenses recorded for current month"
           tone="bg-rose-50 text-rose-700"
           badge="Monthly"
         />
         <SummaryCard
           title="Total Balance"
           value={formatCurrency(remainingBalance, currencySymbol)}
-          detail={`Monthly income minus expenses for the current period`}
+          detail="Income minus expenses for current month"
           tone="bg-sky-50 text-sky-700"
           badge="Monthly"
         />
-        <SummaryCard
-          title="Savings"
-          value={formatCurrency(totalSavings, currencySymbol)}
-          detail={`Includes ${formatCurrency(baseSavingsAmount, currencySymbol)} base savings and ${formatCurrency(
-            remainingBalance,
-            currencySymbol
-          )} monthly savings`}
-          tone="bg-amber-50 text-amber-700"
-          badge="Total"
-        />
+      </section>
+
+      <section className="mt-6 rounded-[28px] border border-line bg-surface p-6 shadow-[0_18px_40px_rgba(15,23,42,0.05)]">
+        <div>
+          <div>
+            <h2 className="text-xl font-semibold tracking-tight text-slate-950">
+              Savings
+            </h2>
+            <p className="mt-1 text-sm text-muted">
+              Starting savings adjusted by the current month net change and tracked against your target savings.
+            </p>
+          </div>
+        </div>
+
+        {isSavingsGoalLoading ? (
+          <div className="mt-6 space-y-4 rounded-3xl bg-slate-50 px-5 py-5">
+            <div className="h-10 w-48 animate-pulse rounded-2xl bg-white" />
+            <div className="h-3 w-full animate-pulse rounded-full bg-white" />
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+              {[0, 1, 2, 3, 4].map((item) => (
+                <div
+                  key={item}
+                  className="animate-pulse rounded-2xl bg-white px-4 py-4"
+                >
+                  <div className="h-3 w-24 rounded-full bg-slate-100" />
+                  <div className="mt-3 h-6 w-28 rounded-full bg-slate-200" />
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : savingsGoalError ? (
+          <div className="mt-6 rounded-2xl bg-rose-50 px-4 py-4 text-sm text-rose-700">
+            {savingsGoalError}
+          </div>
+        ) : !savingsGoal && hasLoadedSavingsGoal ? (
+          <div className="mt-6 rounded-3xl bg-slate-50 px-5 py-8">
+            <p className="text-base font-semibold text-slate-900">
+              No savings plan yet
+            </p>
+            <p className="mt-2 max-w-2xl text-sm text-muted">
+              Set up your savings plan from the Savings page to start tracking carried savings and target progress.
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="mt-6">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <p className="text-sm font-medium text-muted">Total Savings</p>
+                  <p className="mt-2 text-4xl font-semibold tracking-tight text-slate-950">
+                    {formatCurrency(totalSavings, currencySymbol)}
+                  </p>
+                </div>
+                <div className="text-sm text-muted sm:text-right">
+                  <p>Target Savings</p>
+                  <p className="mt-1 font-semibold text-slate-950">
+                    {formatCurrency(targetSavings, currencySymbol)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-5 h-3 rounded-full bg-slate-100">
+                <div
+                  className="h-3 rounded-full bg-gradient-to-r from-amber-400 via-teal-400 to-sky-500 transition-[width]"
+                  style={{ width: `${savingsProgress}%` }}
+                />
+              </div>
+            </div>
+          </>
+        )}
       </section>
 
       <div className="mt-6 grid gap-6 xl:grid-cols-[1.55fr_1fr]">
@@ -292,7 +382,7 @@ export function DashboardView() {
             {trendPoints.map((point) => (
               <div
                 key={point.label}
-                className="flex flex-1 flex-col items-center justify-end gap-3"
+                className="flex min-w-0 flex-1 flex-col items-center justify-end gap-3"
               >
                 <div
                   className="w-full rounded-t-2xl"
@@ -301,7 +391,13 @@ export function DashboardView() {
                     backgroundImage: `linear-gradient(to top, ${activeChartPalette.colors[0]}, ${activeChartPalette.colors[1]})`,
                   }}
                 />
-                <span className="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">
+                <span
+                  className={`text-center text-xs font-medium text-slate-500 ${
+                    trendView === "monthly"
+                      ? "w-full truncate"
+                      : "uppercase tracking-[0.22em]"
+                  }`}
+                >
                   {point.label}
                 </span>
               </div>
@@ -322,7 +418,7 @@ export function DashboardView() {
               </p>
             </div>
             <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
-              This month
+              Current period
             </div>
           </div>
 
@@ -333,7 +429,7 @@ export function DashboardView() {
                   No category spending yet
                 </p>
                 <p className="mt-2 text-sm text-muted">
-                  Your monthly expense categories will appear here after you log transactions.
+                  Your current period expense categories will appear here after you log transactions.
                 </p>
               </div>
             ) : (
@@ -409,7 +505,7 @@ export function DashboardView() {
             Budget health
           </h2>
           <p className="mt-1 text-sm text-muted">
-            See how each monthly budget is tracking against real spending so far.
+            See how each recurring budget is tracking against real spending in the current period.
           </p>
 
           <div className="mt-7 space-y-3">
@@ -443,7 +539,6 @@ export function DashboardView() {
               </div>
             ) : (
               budgetUsageSummary.map((budget) => {
-                const roundedPercentage = Math.round(budget.usagePercentage);
                 const visualPercentage = Math.min(
                   Math.max(budget.usagePercentage, 0),
                   100
@@ -467,7 +562,7 @@ export function DashboardView() {
                         </h3>
                       </div>
                       <p className="text-sm font-semibold text-slate-950">
-                        {roundedPercentage}%
+                        Budget: {formatCurrency(budget.monthlyLimit, currencySymbol)}
                       </p>
                     </div>
 
@@ -488,13 +583,19 @@ export function DashboardView() {
                     </div>
 
                     <div className="mt-3 flex items-center justify-between text-sm text-muted">
-                      <span>{formatCurrency(budget.usedAmount, currencySymbol)} used</span>
                       <span>
-                        {formatCurrency(
-                          Math.abs(remainingAmount),
-                          currencySymbol
-                        )}{" "}
-                        {isOverBudget ? "over budget" : "left"}
+                        Spent: {formatCurrency(budget.usedAmount, currencySymbol)}
+                      </span>
+                      <span>
+                        {isOverBudget
+                          ? `Over by ${formatCurrency(
+                              Math.abs(remainingAmount),
+                              currencySymbol
+                            )}`
+                          : `Remaining: ${formatCurrency(
+                              remainingAmount,
+                              currencySymbol
+                            )}`}
                       </span>
                     </div>
                   </article>

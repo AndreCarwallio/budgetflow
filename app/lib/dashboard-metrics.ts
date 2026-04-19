@@ -5,7 +5,7 @@ type SpendingPoint = {
   amount: number;
 };
 
-function toDate(date: string) {
+export function toDate(date: string) {
   return new Date(`${date}T00:00:00`);
 }
 
@@ -41,6 +41,34 @@ export function getCurrentMonthTransactions(
   );
 }
 
+export function getTransactionsInRange(
+  transactions: Transaction[],
+  startDate: Date,
+  endExclusive: Date
+) {
+  return transactions.filter((transaction) => {
+    const transactionDate = toDate(transaction.date);
+
+    return transactionDate >= startDate && transactionDate < endExclusive;
+  });
+}
+
+export function getIncomeExpensesForTransactions(transactions: Transaction[]) {
+  const income = transactions
+    .filter((transaction) => transaction.type === "income")
+    .reduce((sum, transaction) => sum + transaction.amount, 0);
+
+  const expenses = transactions
+    .filter((transaction) => transaction.type === "expense")
+    .reduce((sum, transaction) => sum + transaction.amount, 0);
+
+  return {
+    income,
+    expenses,
+    remainingBalance: income - expenses,
+  };
+}
+
 export function getMonthlyIncomeExpenses(
   transactions: Transaction[],
   referenceDate = new Date()
@@ -49,28 +77,19 @@ export function getMonthlyIncomeExpenses(
     transactions,
     referenceDate
   );
-
-  const income = monthlyTransactions
-    .filter((transaction) => transaction.type === "income")
-    .reduce((sum, transaction) => sum + transaction.amount, 0);
-
-  const expenses = monthlyTransactions
-    .filter((transaction) => transaction.type === "expense")
-    .reduce((sum, transaction) => sum + transaction.amount, 0);
+  const { income, expenses, remainingBalance } =
+    getIncomeExpensesForTransactions(monthlyTransactions);
 
   return {
     monthlyTransactions,
     income,
     expenses,
-    remainingBalance: income - expenses,
+    remainingBalance,
   };
 }
 
-export function getCurrentMonthCategorySpending(
-  transactions: Transaction[],
-  referenceDate = new Date()
-) {
-  return getCurrentMonthTransactions(transactions, referenceDate)
+export function getCategorySpending(transactions: Transaction[]) {
+  return transactions
     .filter((transaction) => transaction.type === "expense")
     .reduce<Record<string, number>>((accumulator, transaction) => {
       accumulator[transaction.category] =
@@ -79,15 +98,20 @@ export function getCurrentMonthCategorySpending(
     }, {});
 }
 
-export function getBudgetUsageSummary(
-  budgets: Budget[],
+export function getCurrentMonthCategorySpending(
   transactions: Transaction[],
   referenceDate = new Date()
 ) {
-  const categorySpending = getCurrentMonthCategorySpending(
-    transactions,
-    referenceDate
+  return getCategorySpending(
+    getCurrentMonthTransactions(transactions, referenceDate)
   );
+}
+
+export function getBudgetUsageSummaryForTransactions(
+  budgets: Budget[],
+  transactions: Transaction[]
+) {
+  const categorySpending = getCategorySpending(transactions);
 
   return budgets.map((budget) => {
     const usedAmount = categorySpending[budget.category] ?? 0;
@@ -100,6 +124,17 @@ export function getBudgetUsageSummary(
       usagePercentage,
     };
   });
+}
+
+export function getBudgetUsageSummary(
+  budgets: Budget[],
+  transactions: Transaction[],
+  referenceDate = new Date()
+) {
+  return getBudgetUsageSummaryForTransactions(
+    budgets,
+    getCurrentMonthTransactions(transactions, referenceDate)
+  );
 }
 
 export function getWeeklySpendingPoints(
@@ -130,23 +165,37 @@ export function getMonthlySpendingPoints(
   transactions: Transaction[],
   referenceDate = new Date()
 ): SpendingPoint[] {
-  const points = [
-    { label: "W1", amount: 0 },
-    { label: "W2", amount: 0 },
-    { label: "W3", amount: 0 },
-    { label: "W4", amount: 0 },
-    { label: "W5", amount: 0 },
-  ];
+  const formatter = new Intl.DateTimeFormat("en-US", { month: "short" });
+  const points = Array.from({ length: 5 }, (_, index) => {
+    const monthDate = new Date(
+      referenceDate.getFullYear(),
+      referenceDate.getMonth() - (4 - index),
+      1
+    );
 
-  getCurrentMonthTransactions(transactions, referenceDate)
+    return {
+      label: formatter.format(monthDate),
+      amount: 0,
+      year: monthDate.getFullYear(),
+      month: monthDate.getMonth(),
+    };
+  });
+
+  transactions
     .filter((transaction) => transaction.type === "expense")
     .forEach((transaction) => {
       const date = toDate(transaction.date);
-      const weekIndex = Math.min(Math.floor((date.getDate() - 1) / 7), 4);
-      points[weekIndex].amount += transaction.amount;
+      const point = points.find(
+        (entry) =>
+          entry.year === date.getFullYear() && entry.month === date.getMonth()
+      );
+
+      if (point) {
+        point.amount += transaction.amount;
+      }
     });
 
-  return points;
+  return points.map(({ label, amount }) => ({ label, amount }));
 }
 
 export function getTotalSavingsValue(
