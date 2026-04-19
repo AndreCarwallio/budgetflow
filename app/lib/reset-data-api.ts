@@ -11,6 +11,7 @@ export async function resetUserData(
     supabase.from("categories").delete().eq("user_id", userId),
     supabase.from("app_preferences").delete().eq("user_id", userId),
     supabase.from("app_settings").delete().eq("user_id", userId),
+    supabase.from("currency_presets").delete().eq("user_id", userId),
     supabase.from("monthly_snapshots").delete().eq("user_id", userId),
   ];
 
@@ -21,6 +22,7 @@ export async function resetUserData(
     categoriesResult,
     preferencesResult,
     appSettingsResult,
+    currencyPresetsResult,
     monthlySnapshotsResult,
   ] =
     await Promise.all(tableDeletes);
@@ -32,6 +34,7 @@ export async function resetUserData(
     categoriesResult.error,
     preferencesResult.error,
     appSettingsResult.error,
+    currencyPresetsResult.error,
     monthlySnapshotsResult.error,
   ].filter(Boolean);
 

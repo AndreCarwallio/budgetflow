@@ -5,6 +5,65 @@ import { type ReactNode, useEffect, useMemo, useState, useTransition } from "rea
 import { categoryColorOptions, chartPalettes } from "../lib/transactions";
 import { useTransactions } from "./transactions-provider";
 
+const currencyOptions = (
+  [
+    { code: "USD", label: "US Dollar", symbol: "$" },
+    { code: "EUR", label: "Euro", symbol: "EUR" },
+    { code: "GBP", label: "British Pound", symbol: "GBP" },
+    { code: "LKR", label: "Sri Lankan Rupee", symbol: "Rs" },
+    { code: "INR", label: "Indian Rupee", symbol: "Rs" },
+    { code: "BDT", label: "Bangladeshi Taka", symbol: "Tk" },
+    { code: "CAD", label: "Canadian Dollar", symbol: "C$" },
+    { code: "AUD", label: "Australian Dollar", symbol: "A$" },
+    { code: "JPY", label: "Japanese Yen", symbol: "JPY" },
+    { code: "CNY", label: "Chinese Yuan", symbol: "CNY" },
+    { code: "HKD", label: "Hong Kong Dollar", symbol: "HK$" },
+    { code: "SGD", label: "Singapore Dollar", symbol: "S$" },
+    { code: "NZD", label: "New Zealand Dollar", symbol: "NZ$" },
+    { code: "CHF", label: "Swiss Franc", symbol: "CHF" },
+    { code: "SEK", label: "Swedish Krona", symbol: "SEK" },
+    { code: "NOK", label: "Norwegian Krone", symbol: "NOK" },
+    { code: "DKK", label: "Danish Krone", symbol: "DKK" },
+    { code: "PLN", label: "Polish Zloty", symbol: "PLN" },
+    { code: "CZK", label: "Czech Koruna", symbol: "CZK" },
+    { code: "HUF", label: "Hungarian Forint", symbol: "HUF" },
+    { code: "RON", label: "Romanian Leu", symbol: "RON" },
+    { code: "RUB", label: "Russian Ruble", symbol: "RUB" },
+    { code: "TRY", label: "Turkish Lira", symbol: "TRY" },
+    { code: "AED", label: "UAE Dirham", symbol: "AED" },
+    { code: "SAR", label: "Saudi Riyal", symbol: "SAR" },
+    { code: "QAR", label: "Qatari Riyal", symbol: "QAR" },
+    { code: "KWD", label: "Kuwaiti Dinar", symbol: "KWD" },
+    { code: "BHD", label: "Bahraini Dinar", symbol: "BHD" },
+    { code: "OMR", label: "Omani Rial", symbol: "OMR" },
+    { code: "ILS", label: "Israeli New Shekel", symbol: "ILS" },
+    { code: "ZAR", label: "South African Rand", symbol: "R" },
+    { code: "EGP", label: "Egyptian Pound", symbol: "EGP" },
+    { code: "NGN", label: "Nigerian Naira", symbol: "NGN" },
+    { code: "KES", label: "Kenyan Shilling", symbol: "KES" },
+    { code: "GHS", label: "Ghanaian Cedi", symbol: "GHS" },
+    { code: "MAD", label: "Moroccan Dirham", symbol: "MAD" },
+    { code: "PKR", label: "Pakistani Rupee", symbol: "PKR" },
+    { code: "NPR", label: "Nepalese Rupee", symbol: "NPR" },
+    { code: "THB", label: "Thai Baht", symbol: "THB" },
+    { code: "MYR", label: "Malaysian Ringgit", symbol: "MYR" },
+    { code: "IDR", label: "Indonesian Rupiah", symbol: "IDR" },
+    { code: "PHP", label: "Philippine Peso", symbol: "PHP" },
+    { code: "VND", label: "Vietnamese Dong", symbol: "VND" },
+    { code: "KRW", label: "South Korean Won", symbol: "KRW" },
+    { code: "TWD", label: "New Taiwan Dollar", symbol: "TWD" },
+    { code: "MXN", label: "Mexican Peso", symbol: "MX$" },
+    { code: "BRL", label: "Brazilian Real", symbol: "R$" },
+    { code: "ARS", label: "Argentine Peso", symbol: "ARS" },
+    { code: "CLP", label: "Chilean Peso", symbol: "CLP" },
+    { code: "COP", label: "Colombian Peso", symbol: "COP" },
+    { code: "PEN", label: "Peruvian Sol", symbol: "PEN" },
+    { code: "UYU", label: "Uruguayan Peso", symbol: "UYU" },
+  ] as const
+)
+  .slice()
+  .sort((left, right) => left.code.localeCompare(right.code));
+
 function AccordionSection({
   title,
   description,
@@ -48,29 +107,39 @@ export function SettingsView() {
     addSubcategory,
     appSettings,
     appSettingsError,
+    baseCurrencyCode,
     categories,
     categoriesError,
     chartPalette,
     clearAppSettingsError,
     clearCategoriesError,
+    clearCurrencyPresetsError,
     clearPreferencesError,
+    currencyPresets,
+    currencyPresetsError,
+    displayCurrencyCode,
     deleteCategory,
     deleteSubcategory,
     getSubcategoriesForCategory,
     getCategoryColor,
     hasLoadedAppSettings,
     hasLoadedCategories,
+    hasLoadedCurrencyPresets,
     isAppSettingsLoading,
     isCategoriesLoading,
+    isCurrencyPresetsLoading,
     isPreferencesLoading,
     isResettingUserData,
     preferencesError,
+    refreshCurrencyPresetRate,
     renameCategory,
     renameSubcategory,
     resetUserData,
     saveCategoryColor,
     saveChartPalette,
     saveAppSettings,
+    saveCurrencyPreset,
+    saveDisplayCurrencyCode,
     currencySymbol,
   } = useTransactions();
   const [newCategoryName, setNewCategoryName] = useState("");
@@ -102,11 +171,15 @@ export function SettingsView() {
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     reset: false,
     categories: false,
+    currency: false,
     appearance: false,
     savings: false,
     account: false,
     data: false,
   });
+  const [selectedCurrencyCode, setSelectedCurrencyCode] = useState(displayCurrencyCode);
+  const [manualExchangeRate, setManualExchangeRate] = useState("");
+  const [isAutoExchangeEnabled, setIsAutoExchangeEnabled] = useState(true);
 
   useEffect(() => {
     setResetPeriodMode(appSettings?.resetPeriodMode ?? "monthly");
@@ -136,6 +209,34 @@ export function SettingsView() {
       [sectionId]: !current[sectionId],
     }));
   }
+
+  const selectedCurrencyOption =
+    currencyOptions.find((option) => option.code === selectedCurrencyCode) ??
+    currencyOptions[0];
+  const selectedCurrencyPreset = currencyPresets.find(
+    (preset) => preset.currencyCode === selectedCurrencyCode
+  );
+
+  useEffect(() => {
+    setSelectedCurrencyCode(displayCurrencyCode);
+  }, [displayCurrencyCode]);
+
+  useEffect(() => {
+    if (selectedCurrencyCode === baseCurrencyCode) {
+      setIsAutoExchangeEnabled(true);
+      setManualExchangeRate("1");
+      return;
+    }
+
+    if (selectedCurrencyPreset) {
+      setIsAutoExchangeEnabled(selectedCurrencyPreset.autoFillEnabled);
+      setManualExchangeRate(selectedCurrencyPreset.exchangeRate.toFixed(6));
+      return;
+    }
+
+    setIsAutoExchangeEnabled(true);
+    setManualExchangeRate("");
+  }, [baseCurrencyCode, selectedCurrencyCode, selectedCurrencyPreset]);
 
   return (
     <>
@@ -590,6 +691,226 @@ export function SettingsView() {
         </AccordionSection>
 
         <AccordionSection
+          title="Currency"
+          description="Choose a currency, let the app refresh the exchange rate automatically, or switch to a manual rate only when needed."
+          isOpen={openSections.currency}
+          onToggle={() => toggleSection("currency")}
+        >
+          {currencyPresetsError ? (
+            <div className="rounded-2xl bg-rose-50 px-4 py-4 text-sm text-rose-700">
+              {currencyPresetsError}
+            </div>
+          ) : null}
+
+          {isCurrencyPresetsLoading ? (
+            <div className="rounded-2xl bg-slate-50 px-4 py-10 text-center text-sm text-muted">
+              Loading saved currencies...
+            </div>
+          ) : (
+            <div className="space-y-5 rounded-3xl bg-slate-50 px-5 py-5">
+              <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+                <label className="space-y-2">
+                  <span className="text-sm font-medium text-slate-700">
+                    Currency
+                  </span>
+                  <select
+                    value={selectedCurrencyCode}
+                    onChange={(event) => {
+                      clearCurrencyPresetsError();
+                      setSelectedCurrencyCode(event.target.value);
+                    }}
+                    className="w-full rounded-2xl border border-line bg-white px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-slate-400"
+                  >
+                    {currencyOptions.map((option) => (
+                      <option key={option.code} value={option.code}>
+                        {option.code} — {option.label} ({option.symbol})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <div className="rounded-2xl bg-white px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                    Current rate
+                  </p>
+                  <div className="mt-3 flex items-center gap-2">
+                    <span className="text-xl font-semibold text-slate-950">
+                      {selectedCurrencyCode === baseCurrencyCode
+                        ? "1.000000"
+                        : (selectedCurrencyPreset?.exchangeRate ?? 1).toFixed(6)}
+                    </span>
+                    <span
+                      className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                        selectedCurrencyCode === baseCurrencyCode || isAutoExchangeEnabled
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "bg-amber-50 text-amber-700"
+                      }`}
+                    >
+                      {selectedCurrencyCode === baseCurrencyCode || isAutoExchangeEnabled
+                        ? "Auto"
+                        : "Manual"}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-sm text-muted">
+                    {selectedCurrencyCode === baseCurrencyCode
+                      ? "Base currency values stay at 1.000000."
+                      : selectedCurrencyPreset?.lastFetchedAt
+                        ? `Saved on ${new Intl.DateTimeFormat("en-US", {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          }).format(new Date(selectedCurrencyPreset.lastFetchedAt))}`
+                        : "Using the currently saved rate for this currency."}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-4 rounded-2xl bg-white px-4 py-4">
+                <label className="inline-flex items-center gap-3 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={selectedCurrencyCode === baseCurrencyCode ? true : isAutoExchangeEnabled}
+                    onChange={(event) => {
+                      if (selectedCurrencyCode === baseCurrencyCode) {
+                        return;
+                      }
+
+                      setIsAutoExchangeEnabled(event.target.checked);
+                    }}
+                    disabled={selectedCurrencyCode === baseCurrencyCode}
+                    className="h-4 w-4 rounded border-line"
+                  />
+                  Auto exchange rate
+                </label>
+
+                {!isAutoExchangeEnabled && selectedCurrencyCode !== baseCurrencyCode ? (
+                  <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+                    <label className="space-y-2">
+                      <span className="text-sm font-medium text-slate-700">
+                        Manual exchange rate
+                      </span>
+                      <input
+                        type="number"
+                        min="0.000001"
+                        step="0.000001"
+                        value={manualExchangeRate}
+                        onChange={(event) => setManualExchangeRate(event.target.value)}
+                        placeholder="Enter exchange rate"
+                        className="w-full rounded-2xl border border-line bg-surface px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-slate-400"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        clearCurrencyPresetsError();
+                        startTransition(async () => {
+                          const savedPresetId = await saveCurrencyPreset({
+                            id: selectedCurrencyPreset?.id,
+                            currencyCode: selectedCurrencyOption.code,
+                            currencyLabel: selectedCurrencyOption.label,
+                            currencySymbol: selectedCurrencyOption.symbol,
+                            exchangeRate: Number.parseFloat(manualExchangeRate || "1"),
+                            autoFillEnabled: false,
+                          });
+
+                          if (savedPresetId) {
+                            await saveDisplayCurrencyCode(selectedCurrencyOption.code);
+                          }
+                        });
+                      }}
+                      disabled={isPending}
+                      className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-700"
+                    >
+                      Apply
+                    </button>
+                  </div>
+                ) : null}
+
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      clearCurrencyPresetsError();
+                      startTransition(async () => {
+                        const savedPresetId = await saveCurrencyPreset({
+                          id: selectedCurrencyPreset?.id,
+                          currencyCode: selectedCurrencyOption.code,
+                          currencyLabel: selectedCurrencyOption.label,
+                          currencySymbol: selectedCurrencyOption.symbol,
+                          exchangeRate:
+                            selectedCurrencyOption.code === baseCurrencyCode
+                              ? 1
+                              : selectedCurrencyPreset?.exchangeRate ?? 1,
+                          autoFillEnabled:
+                            selectedCurrencyOption.code === baseCurrencyCode
+                              ? true
+                              : isAutoExchangeEnabled,
+                        });
+
+                        if (!savedPresetId) {
+                          return;
+                        }
+
+                        if (
+                          selectedCurrencyOption.code !== baseCurrencyCode &&
+                          isAutoExchangeEnabled
+                        ) {
+                          await refreshCurrencyPresetRate(savedPresetId);
+                        }
+
+                        await saveDisplayCurrencyCode(selectedCurrencyOption.code);
+                      });
+                    }}
+                    disabled={isPending}
+                    className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-700"
+                  >
+                    Use currency
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!selectedCurrencyPreset) {
+                        return;
+                      }
+
+                      clearCurrencyPresetsError();
+                      void refreshCurrencyPresetRate(selectedCurrencyPreset.id);
+                    }}
+                    disabled={!selectedCurrencyPreset || isPending}
+                    className="rounded-2xl border border-line bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    Refresh rate
+                  </button>
+                </div>
+              </div>
+
+              {hasLoadedCurrencyPresets ? (
+                <div>
+                  <p className="text-sm font-medium text-slate-700">
+                    Available in the app
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {currencyPresets.map((preset) => (
+                      <span
+                        key={preset.id}
+                        className={`rounded-full px-3 py-2 text-sm font-medium ${
+                          preset.currencyCode === displayCurrencyCode
+                            ? "bg-slate-950 text-white"
+                            : "bg-white text-slate-700"
+                        }`}
+                      >
+                        {preset.currencyCode} · {preset.currencySymbol} ·{" "}
+                        {preset.autoFillEnabled ? "Auto" : "Manual"}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          )}
+        </AccordionSection>
+
+        <AccordionSection
           title="Appearance / Colors"
           description="Choose the chart palette used across the dashboard and fine-tune category colors."
           isOpen={openSections.appearance}
@@ -676,10 +997,10 @@ export function SettingsView() {
           onToggle={() => toggleSection("account")}
         >
           <div className="space-y-4">
-            <div className="rounded-2xl bg-slate-50 px-4 py-4">
+              <div className="rounded-2xl bg-slate-50 px-4 py-4">
                 <p className="text-sm font-semibold text-slate-950">Currency display</p>
                 <p className="mt-1 text-sm text-muted">
-                  Currently showing amounts in <span className="font-medium text-slate-900">{currencySymbol}</span>. Change it anytime from the header toggle.
+                  Currently showing amounts in <span className="font-medium text-slate-900">{displayCurrencyCode} ({currencySymbol})</span> while stored values remain based on <span className="font-medium text-slate-900">{baseCurrencyCode}</span>.
                 </p>
               </div>
 
@@ -734,7 +1055,7 @@ export function SettingsView() {
           <div className="rounded-2xl border border-rose-200 bg-rose-50 px-5 py-5">
             <p className="text-sm font-semibold text-rose-900">Danger zone</p>
             <p className="mt-2 text-sm leading-6 text-rose-800">
-              Resetting data deletes this account&apos;s transactions, budgets, savings goal, reset period settings, snapshot history, custom categories, subcategories, and appearance preferences. It does not delete the auth account, and default categories remain available afterward.
+              Resetting data deletes this account&apos;s transactions, budgets, savings goal, reset period settings, snapshot history, saved currencies, custom categories, subcategories, and appearance preferences. It does not delete the auth account, and default categories remain available afterward.
             </p>
             <button
               type="button"
@@ -764,7 +1085,7 @@ export function SettingsView() {
                   Confirm data reset
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-muted">
-                  This permanently removes only this user&apos;s transactions, budgets, savings goal, reset period settings, snapshot history, custom categories, subcategories, and chart preferences. Type <span className="font-semibold text-slate-950">RESET</span> to continue.
+                  This permanently removes only this user&apos;s transactions, budgets, savings goal, reset period settings, snapshot history, saved currencies, custom categories, subcategories, and chart preferences. Type <span className="font-semibold text-slate-950">RESET</span> to continue.
                 </p>
               </div>
               <button

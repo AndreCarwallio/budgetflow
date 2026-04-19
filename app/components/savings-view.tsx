@@ -9,22 +9,13 @@ import {
 import { getActivePeriod } from "../lib/periods";
 import { useTransactions } from "./transactions-provider";
 
-function formatCurrency(amount: number, currencySymbol: string) {
-  const formattedAmount = new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount);
-
-  return `${currencySymbol} ${formattedAmount}`;
-}
-
 export function SavingsView() {
   const {
     appSettings,
     clearSavingsGoalError,
     closeSavingsGoalModal,
-    currencySymbol,
     deleteSavingsGoal,
+    formatDisplayCurrency,
     hasLoadedSavingsGoal,
     isSavingsGoalLoading,
     monthlySnapshots,
@@ -125,13 +116,13 @@ export function SavingsView() {
                 <div>
                   <p className="text-sm font-medium text-muted">Total Savings</p>
                   <p className="mt-2 text-4xl font-semibold tracking-tight text-slate-950">
-                    {formatCurrency(totalSavings, currencySymbol)}
+                    {formatDisplayCurrency(totalSavings)}
                   </p>
                 </div>
                 <div className="text-sm text-muted sm:text-right">
                   <p>Target Savings</p>
                   <p className="mt-1 font-semibold text-slate-950">
-                    {formatCurrency(targetSavings, currencySymbol)}
+                    {formatDisplayCurrency(targetSavings)}
                   </p>
                 </div>
               </div>
@@ -157,7 +148,7 @@ export function SavingsView() {
                   Starting Savings
                 </p>
                 <p className="mt-3 text-xl font-semibold tracking-tight text-slate-950">
-                  {formatCurrency(startingSavings, currencySymbol)}
+                  {formatDisplayCurrency(startingSavings)}
                 </p>
               </div>
               <div className="rounded-2xl border border-line bg-slate-50 px-4 py-4">
@@ -170,7 +161,7 @@ export function SavingsView() {
                   }`}
                 >
                   {remainingBalance >= 0 ? "+" : "-"}
-                  {formatCurrency(Math.abs(remainingBalance), currencySymbol)}
+                  {formatDisplayCurrency(Math.abs(remainingBalance))}
                 </p>
               </div>
               <div className="rounded-2xl border border-line bg-slate-50 px-4 py-4">
@@ -178,7 +169,7 @@ export function SavingsView() {
                   Target Savings
                 </p>
                 <p className="mt-3 text-xl font-semibold tracking-tight text-slate-950">
-                  {formatCurrency(targetSavings, currencySymbol)}
+                  {formatDisplayCurrency(targetSavings)}
                 </p>
               </div>
               <div className="rounded-2xl border border-line bg-slate-50 px-4 py-4">
@@ -186,7 +177,7 @@ export function SavingsView() {
                   Remaining to Target
                 </p>
                 <p className="mt-3 text-xl font-semibold tracking-tight text-slate-950">
-                  {formatCurrency(remainingToGoal, currencySymbol)}
+                  {formatDisplayCurrency(remainingToGoal)}
                 </p>
               </div>
             </div>

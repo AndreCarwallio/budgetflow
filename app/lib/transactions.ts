@@ -108,6 +108,19 @@ export type MonthlySnapshot = {
   updatedAt: string;
 };
 
+export type CurrencyPreset = {
+  id: string;
+  userId: string;
+  currencyCode: string;
+  currencyLabel: string;
+  currencySymbol: string;
+  exchangeRate: number;
+  autoFillEnabled: boolean;
+  lastFetchedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type ChartPalette = "ocean" | "sunset" | "forest" | "mono";
 
 export type ChartPaletteConfig = {

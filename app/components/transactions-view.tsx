@@ -3,15 +3,6 @@
 import { useMemo, useState } from "react";
 import { useTransactions } from "./transactions-provider";
 
-function formatCurrency(amount: number, currencySymbol: string) {
-  const formattedAmount = new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount);
-
-  return `${currencySymbol} ${formattedAmount}`;
-}
-
 function formatDate(date: string) {
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
@@ -23,8 +14,8 @@ function formatDate(date: string) {
 export function TransactionsView() {
   const {
     categories,
-    currencySymbol,
     deleteTransaction,
+    formatDisplayCurrency,
     hasLoadedTransactions,
     isTransactionsLoading,
     transactions,
@@ -148,7 +139,7 @@ export function TransactionsView() {
                     }`}
                   >
                     {transaction.type === "income" ? "+" : "-"}
-                    {formatCurrency(transaction.amount, currencySymbol)}
+                    {formatDisplayCurrency(transaction.amount)}
                   </p>
                 </div>
 

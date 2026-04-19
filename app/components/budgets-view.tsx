@@ -4,15 +4,6 @@ import { useMemo, useState } from "react";
 import type { TransactionCategory } from "../lib/transactions";
 import { useTransactions } from "./transactions-provider";
 
-function formatCurrency(amount: number, currencySymbol: string) {
-  const formattedAmount = new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount);
-
-  return `${currencySymbol} ${formattedAmount}`;
-}
-
 const progressTones = {
   safe: "bg-emerald-500",
   warning: "bg-amber-500",
@@ -23,8 +14,8 @@ export function BudgetsView() {
   const {
     budgets,
     budgetsError,
-    currencySymbol,
     deleteBudget,
+    formatDisplayCurrency,
     hasLoadedBudgets,
     isBudgetsLoading,
     openBudgetModal,
@@ -142,13 +133,13 @@ export function BudgetsView() {
                   <div className="rounded-2xl bg-white p-4">
                     <p className="text-sm font-medium text-muted">Limit</p>
                     <p className="mt-2 text-lg font-semibold text-slate-950">
-                      {formatCurrency(budget.monthlyLimit, currencySymbol)}
+                      {formatDisplayCurrency(budget.monthlyLimit)}
                     </p>
                   </div>
                   <div className="rounded-2xl bg-white p-4">
                     <p className="text-sm font-medium text-muted">Spent</p>
                     <p className="mt-2 text-lg font-semibold text-slate-950">
-                      {formatCurrency(spent, currencySymbol)}
+                      {formatDisplayCurrency(spent)}
                     </p>
                   </div>
                   <div className="rounded-2xl bg-white p-4">
@@ -158,7 +149,7 @@ export function BudgetsView() {
                         remaining < 0 ? "text-rose-600" : "text-slate-950"
                       }`}
                     >
-                      {formatCurrency(Math.abs(remaining), currencySymbol)}
+                      {formatDisplayCurrency(Math.abs(remaining))}
                       {remaining < 0 ? " over" : ""}
                     </p>
                   </div>

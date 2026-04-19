@@ -12,17 +12,31 @@ import {
 } from "react";
 import {
   ensureAppSettings,
-  fetchAppSettings,
   getDefaultAppSettings,
   upsertAppSettings,
   type AppSettingsPayload,
 } from "../lib/app-settings-api";
+import {
+  convertFromBaseCurrency,
+  createDefaultCurrencyPreset,
+  DEFAULT_CURRENCY_CODE,
+  formatDisplayAmount,
+  normalizeCurrencyCode,
+} from "../lib/currency";
+import {
+  createCurrencyPreset,
+  fetchCurrencyPresets,
+  removeCurrencyPreset,
+  updateCurrencyPreset,
+  type CurrencyPresetPayload,
+} from "../lib/currency-presets-api";
 import {
   getBudgetUsageSummaryForTransactions,
   getCategorySpending,
   getIncomeExpensesForTransactions,
   getTransactionsInRange,
 } from "../lib/dashboard-metrics";
+import { fetchExchangeRate } from "../lib/exchange-rates";
 import {
   fetchMonthlySnapshots,
   updateMonthlySnapshot,
@@ -50,6 +64,7 @@ import {
 } from "../lib/categories-api";
 import {
   fetchAppPreferences,
+  upsertAppPreferences,
   upsertChartPalette,
   type AppPreferences,
 } from "../lib/preferences-api";
@@ -74,6 +89,7 @@ import {
   type Budget,
   type Category,
   type ChartPalette,
+  type CurrencyPreset,
   type MonthlySnapshot,
   type MonthlySnapshotData,
   type ResetPeriodMode,
@@ -84,7 +100,6 @@ import {
   type TransactionType,
 } from "../lib/transactions";
 
-const CURRENCY_STORAGE_KEY = "budgetflow.currencySymbol";
 const DEFAULT_CHART_PALETTE: ChartPalette = "ocean";
 
 function getFallbackCategoryColor(categoryName: string) {
@@ -131,29 +146,20 @@ function pickCategoryColor(name: string) {
   );
 }
 
-function readStoredJSON<T>(key: string): T | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  const storedValue = localStorage.getItem(key);
-
-  if (!storedValue) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(storedValue) as T;
-  } catch {
-    return null;
-  }
-}
-
 type AppSettingsInput = {
   resetPeriodMode: ResetPeriodMode;
   customResetDay: number | null;
   customResetHour: number | null;
   customResetMinute: number | null;
+};
+
+type CurrencyPresetInput = {
+  id?: string;
+  currencyCode: string;
+  currencyLabel: string;
+  currencySymbol: string;
+  exchangeRate: number;
+  autoFillEnabled: boolean;
 };
 
 type SnapshotAdjustmentInput = {
@@ -236,6 +242,8 @@ type TransactionsContextValue = {
   budgets: Budget[];
   savingsGoal: SavingsGoal | null;
   appSettings: AppSettings | null;
+  preferences: AppPreferences | null;
+  currencyPresets: CurrencyPreset[];
   monthlySnapshots: MonthlySnapshot[];
   categories: Category[];
   subcategories: Subcategory[];
@@ -246,6 +254,11 @@ type TransactionsContextValue = {
   saveSavingsGoal: (input: SavingsGoalInput) => Promise<boolean>;
   deleteSavingsGoal: () => Promise<void>;
   saveAppSettings: (input: AppSettingsInput) => Promise<boolean>;
+  saveCurrencyPreset: (input: CurrencyPresetInput) => Promise<string | null>;
+  deleteCurrencyPreset: (presetId: string) => Promise<void>;
+  refreshCurrencyPresetRate: (presetId: string) => Promise<boolean>;
+  saveBaseCurrencyCode: (currencyCode: string) => Promise<boolean>;
+  saveDisplayCurrencyCode: (currencyCode: string) => Promise<boolean>;
   adjustMonthlySnapshot: (
     snapshotId: string,
     input: SnapshotAdjustmentInput
@@ -261,6 +274,8 @@ type TransactionsContextValue = {
   deleteSubcategory: (subcategoryId: string) => Promise<void>;
   getSubcategoriesForCategory: (categoryName: string) => Subcategory[];
   getCategoryColor: (categoryName: string) => string;
+  convertFromBaseAmount: (amount: number) => number;
+  formatDisplayCurrency: (amount: number) => string;
   saveCategoryColor: (categoryId: string, color: string) => Promise<boolean>;
   chartPalette: ChartPalette;
   saveChartPalette: (palette: ChartPalette) => Promise<boolean>;
@@ -274,8 +289,9 @@ type TransactionsContextValue = {
   isSavingsGoalModalOpen: boolean;
   openSavingsGoalModal: () => void;
   closeSavingsGoalModal: () => void;
-  currencySymbol: "$" | "Rs";
-  toggleCurrencySymbol: () => void;
+  currencySymbol: string;
+  displayCurrencyCode: string;
+  baseCurrencyCode: string;
   isTransactionsLoading: boolean;
   transactionsError: string;
   clearTransactionsError: () => void;
@@ -295,6 +311,10 @@ type TransactionsContextValue = {
   isPreferencesLoading: boolean;
   preferencesError: string;
   clearPreferencesError: () => void;
+  isCurrencyPresetsLoading: boolean;
+  currencyPresetsError: string;
+  clearCurrencyPresetsError: () => void;
+  hasLoadedCurrencyPresets: boolean;
   isAppSettingsLoading: boolean;
   appSettingsError: string;
   clearAppSettingsError: () => void;
@@ -348,6 +368,10 @@ export function TransactionsProvider({
   const [preferences, setPreferences] = useState<AppPreferences | null>(null);
   const [isPreferencesLoading, setIsPreferencesLoading] = useState(true);
   const [preferencesError, setPreferencesError] = useState("");
+  const [currencyPresets, setCurrencyPresets] = useState<CurrencyPreset[]>([]);
+  const [isCurrencyPresetsLoading, setIsCurrencyPresetsLoading] = useState(true);
+  const [hasLoadedCurrencyPresets, setHasLoadedCurrencyPresets] = useState(false);
+  const [currencyPresetsError, setCurrencyPresetsError] = useState("");
   const [isAppSettingsLoading, setIsAppSettingsLoading] = useState(true);
   const [hasLoadedAppSettings, setHasLoadedAppSettings] = useState(false);
   const [appSettingsError, setAppSettingsError] = useState("");
@@ -359,15 +383,6 @@ export function TransactionsProvider({
   const [isResettingUserData, setIsResettingUserData] = useState(false);
   const isHandlingRolloverRef = useRef(false);
   const lastRolloverAttemptKeyRef = useRef<string | null>(null);
-  const [currencySymbol, setCurrencySymbol] = useState<"$" | "Rs">(() => {
-    const storedCurrencySymbol = readStoredJSON<"$" | "Rs">(
-      CURRENCY_STORAGE_KEY
-    );
-
-    return storedCurrencySymbol === "$" || storedCurrencySymbol === "Rs"
-      ? storedCurrencySymbol
-      : "$";
-  });
 
   const refreshTransactions = useCallback(async () => {
     if (!userId) {
@@ -474,6 +489,36 @@ export function TransactionsProvider({
 
     const loadedPreferences = await fetchAppPreferences(supabase, userId);
     setPreferences(loadedPreferences);
+  }, [supabase, userId]);
+
+  const refreshCurrencyPresets = useCallback(async () => {
+    if (!userId) {
+      setCurrencyPresets([]);
+      return [];
+    }
+
+    let loadedCurrencyPresets = await fetchCurrencyPresets(supabase, userId);
+
+    if (loadedCurrencyPresets.length === 0) {
+      const defaultPreset = createDefaultCurrencyPreset(userId);
+
+      await createCurrencyPreset(supabase, userId, {
+        currencyCode: defaultPreset.currencyCode,
+        currencyLabel: defaultPreset.currencyLabel,
+        currencySymbol: defaultPreset.currencySymbol,
+        exchangeRate: defaultPreset.exchangeRate,
+        autoFillEnabled: defaultPreset.autoFillEnabled,
+        lastFetchedAt: defaultPreset.lastFetchedAt,
+      });
+      await upsertAppPreferences(supabase, userId, {
+        baseCurrencyCode: defaultPreset.currencyCode,
+        displayCurrencyCode: defaultPreset.currencyCode,
+      });
+      loadedCurrencyPresets = await fetchCurrencyPresets(supabase, userId);
+    }
+
+    setCurrencyPresets(loadedCurrencyPresets);
+    return loadedCurrencyPresets;
   }, [supabase, userId]);
 
   useEffect(() => {
@@ -728,6 +773,70 @@ export function TransactionsProvider({
   useEffect(() => {
     let isActive = true;
 
+    async function loadCurrencyPresets() {
+      if (!userId) {
+        if (isActive) {
+          setCurrencyPresets([]);
+          setIsCurrencyPresetsLoading(false);
+          setHasLoadedCurrencyPresets(true);
+        }
+        return;
+      }
+
+      setIsCurrencyPresetsLoading(true);
+      setCurrencyPresetsError("");
+
+      try {
+        let loadedCurrencyPresets = await fetchCurrencyPresets(supabase, userId);
+
+        if (loadedCurrencyPresets.length === 0) {
+          const defaultPreset = createDefaultCurrencyPreset(userId);
+
+          await createCurrencyPreset(supabase, userId, {
+            currencyCode: defaultPreset.currencyCode,
+            currencyLabel: defaultPreset.currencyLabel,
+            currencySymbol: defaultPreset.currencySymbol,
+            exchangeRate: defaultPreset.exchangeRate,
+            autoFillEnabled: defaultPreset.autoFillEnabled,
+            lastFetchedAt: defaultPreset.lastFetchedAt,
+          });
+          await upsertAppPreferences(supabase, userId, {
+            baseCurrencyCode: defaultPreset.currencyCode,
+            displayCurrencyCode: defaultPreset.currencyCode,
+          });
+          loadedCurrencyPresets = await fetchCurrencyPresets(supabase, userId);
+        }
+
+        if (isActive) {
+          setCurrencyPresets(loadedCurrencyPresets);
+        }
+      } catch (error) {
+        if (isActive) {
+          setCurrencyPresetsError(
+            error instanceof Error
+              ? error.message
+              : "Unable to load saved currencies right now."
+          );
+          setCurrencyPresets([createDefaultCurrencyPreset(userId)]);
+        }
+      } finally {
+        if (isActive) {
+          setIsCurrencyPresetsLoading(false);
+          setHasLoadedCurrencyPresets(true);
+        }
+      }
+    }
+
+    void loadCurrencyPresets();
+
+    return () => {
+      isActive = false;
+    };
+  }, [supabase, userId]);
+
+  useEffect(() => {
+    let isActive = true;
+
     async function loadAppSettings() {
       if (!userId) {
         if (isActive) {
@@ -812,16 +921,30 @@ export function TransactionsProvider({
     };
   }, [supabase, userId]);
 
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    localStorage.setItem(
-      CURRENCY_STORAGE_KEY,
-      JSON.stringify(currencySymbol)
-    );
-  }, [currencySymbol]);
+  const baseCurrencyCode =
+    preferences?.baseCurrencyCode ??
+    currencyPresets.find((preset) => preset.currencyCode === DEFAULT_CURRENCY_CODE)
+      ?.currencyCode ??
+    currencyPresets[0]?.currencyCode ??
+    DEFAULT_CURRENCY_CODE;
+  const displayCurrencyCode =
+    preferences?.displayCurrencyCode ?? baseCurrencyCode;
+  const selectedDisplayCurrency =
+    currencyPresets.find((preset) => preset.currencyCode === displayCurrencyCode) ??
+    currencyPresets.find((preset) => preset.currencyCode === baseCurrencyCode) ??
+    currencyPresets[0] ??
+    createDefaultCurrencyPreset(userId);
+  const currencySymbol = selectedDisplayCurrency.currencySymbol;
+  const convertFromBaseAmount = useCallback(
+    (amount: number) =>
+      convertFromBaseCurrency(amount, selectedDisplayCurrency.exchangeRate),
+    [selectedDisplayCurrency.exchangeRate]
+  );
+  const formatDisplayCurrency = useCallback(
+    (amount: number) =>
+      formatDisplayAmount(convertFromBaseAmount(amount), currencySymbol),
+    [convertFromBaseAmount, currencySymbol]
+  );
 
   const activePeriod = getActivePeriod(appSettings);
   const rolloverCycleKey = [
@@ -1008,6 +1131,8 @@ export function TransactionsProvider({
       budgets,
       savingsGoal,
       appSettings,
+      preferences,
+      currencyPresets,
       monthlySnapshots,
       categories,
       subcategories,
@@ -1180,6 +1305,230 @@ export function TransactionsProvider({
             error instanceof Error
               ? error.message
               : "Unable to save reset period settings right now."
+          );
+          return false;
+        }
+      },
+      saveCurrencyPreset: async (input) => {
+        if (!userId) {
+          setCurrencyPresetsError("You must be logged in to manage currencies.");
+          return null;
+        }
+
+        const currencyCode = normalizeCurrencyCode(input.currencyCode);
+        const payload: CurrencyPresetPayload = {
+          currencyCode,
+          currencyLabel: input.currencyLabel.trim(),
+          currencySymbol: input.currencySymbol.trim(),
+          exchangeRate: currencyCode === baseCurrencyCode ? 1 : input.exchangeRate,
+          autoFillEnabled: input.autoFillEnabled,
+          lastFetchedAt: null,
+        };
+
+        if (!payload.currencyLabel || !payload.currencySymbol) {
+          setCurrencyPresetsError("Currency code, label, and symbol are required.");
+          return null;
+        }
+
+        setCurrencyPresetsError("");
+
+        try {
+          if (input.id) {
+            await updateCurrencyPreset(supabase, userId, input.id, payload);
+          } else {
+            await createCurrencyPreset(supabase, userId, payload);
+          }
+
+          const nextPresets = await refreshCurrencyPresets();
+          return (
+            nextPresets.find((preset) => preset.currencyCode === currencyCode)?.id ??
+            input.id ??
+            null
+          );
+        } catch (error) {
+          setCurrencyPresetsError(
+            error instanceof Error
+              ? error.message
+              : "Unable to save this currency right now."
+          );
+          return null;
+        }
+      },
+      deleteCurrencyPreset: async (presetId) => {
+        if (!userId) {
+          setCurrencyPresetsError("You must be logged in to manage currencies.");
+          return;
+        }
+
+        const preset = currencyPresets.find((item) => item.id === presetId);
+
+        if (!preset) {
+          return;
+        }
+
+        if (currencyPresets.length <= 1) {
+          setCurrencyPresetsError("At least one currency must remain available.");
+          return;
+        }
+
+        if (
+          preset.currencyCode === baseCurrencyCode ||
+          preset.currencyCode === displayCurrencyCode
+        ) {
+          setCurrencyPresetsError(
+            "Choose a different base and display currency before deleting this preset."
+          );
+          return;
+        }
+
+        setCurrencyPresetsError("");
+
+        try {
+          await removeCurrencyPreset(supabase, userId, presetId);
+          await refreshCurrencyPresets();
+        } catch (error) {
+          setCurrencyPresetsError(
+            error instanceof Error
+              ? error.message
+              : "Unable to delete this currency right now."
+          );
+        }
+      },
+      refreshCurrencyPresetRate: async (presetId) => {
+        if (!userId) {
+          setCurrencyPresetsError("You must be logged in to manage currencies.");
+          return false;
+        }
+
+        const preset = currencyPresets.find((item) => item.id === presetId);
+
+        if (!preset) {
+          setCurrencyPresetsError("Currency preset not found.");
+          return false;
+        }
+
+        setCurrencyPresetsError("");
+
+        try {
+          const { exchangeRate, fetchedAt } = await fetchExchangeRate(
+            baseCurrencyCode,
+            preset.currencyCode
+          );
+
+          await updateCurrencyPreset(supabase, userId, preset.id, {
+            currencyCode: preset.currencyCode,
+            currencyLabel: preset.currencyLabel,
+            currencySymbol: preset.currencySymbol,
+            exchangeRate,
+            autoFillEnabled: true,
+            lastFetchedAt: fetchedAt,
+          });
+          await refreshCurrencyPresets();
+          return true;
+        } catch (error) {
+          setCurrencyPresetsError(
+            error instanceof Error
+              ? error.message
+              : "Unable to refresh this exchange rate right now."
+          );
+          return false;
+        }
+      },
+      saveBaseCurrencyCode: async (currencyCode) => {
+        if (!userId) {
+          setCurrencyPresetsError("You must be logged in to manage currencies.");
+          return false;
+        }
+
+        const normalizedCode = normalizeCurrencyCode(currencyCode);
+        const nextBasePreset = currencyPresets.find(
+          (preset) => preset.currencyCode === normalizedCode
+        );
+
+        if (!nextBasePreset) {
+          setCurrencyPresetsError("Select a saved currency as the base currency.");
+          return false;
+        }
+
+        setCurrencyPresetsError("");
+        setPreferencesError("");
+
+        try {
+          await upsertAppPreferences(supabase, userId, {
+            chartPalette,
+            baseCurrencyCode: normalizedCode,
+            displayCurrencyCode:
+              displayCurrencyCode === baseCurrencyCode
+                ? normalizedCode
+                : displayCurrencyCode,
+          });
+
+          await Promise.all([
+            refreshPreferences(),
+            Promise.all(
+              currencyPresets.map((preset) =>
+                updateCurrencyPreset(supabase, userId, preset.id, {
+                  currencyCode: preset.currencyCode,
+                  currencyLabel: preset.currencyLabel,
+                  currencySymbol: preset.currencySymbol,
+                  exchangeRate:
+                    preset.currencyCode === normalizedCode
+                      ? 1
+                      : preset.currencyCode === baseCurrencyCode
+                        ? nextBasePreset.exchangeRate > 0
+                          ? 1 / nextBasePreset.exchangeRate
+                          : preset.exchangeRate
+                        : nextBasePreset.exchangeRate > 0
+                          ? preset.exchangeRate / nextBasePreset.exchangeRate
+                          : preset.exchangeRate,
+                  autoFillEnabled: preset.autoFillEnabled,
+                  lastFetchedAt: preset.lastFetchedAt,
+                })
+              )
+            ),
+          ]);
+          await refreshCurrencyPresets();
+          return true;
+        } catch (error) {
+          setCurrencyPresetsError(
+            error instanceof Error
+              ? error.message
+              : "Unable to save the base currency right now."
+          );
+          return false;
+        }
+      },
+      saveDisplayCurrencyCode: async (currencyCode) => {
+        if (!userId) {
+          setCurrencyPresetsError("You must be logged in to manage currencies.");
+          return false;
+        }
+
+        const normalizedCode = normalizeCurrencyCode(currencyCode);
+        const presetExists = currencyPresets.some(
+          (preset) => preset.currencyCode === normalizedCode
+        );
+
+        if (!presetExists) {
+          setCurrencyPresetsError("Select one of your saved currencies.");
+          return false;
+        }
+
+        setCurrencyPresetsError("");
+
+        try {
+          await upsertAppPreferences(supabase, userId, {
+            chartPalette,
+            baseCurrencyCode,
+            displayCurrencyCode: normalizedCode,
+          });
+          await refreshPreferences();
+          return true;
+        } catch (error) {
+          setCurrencyPresetsError(
+            error instanceof Error
+              ? error.message
+              : "Unable to save the display currency right now."
           );
           return false;
         }
@@ -1517,6 +1866,8 @@ export function TransactionsProvider({
           (subcategory) => subcategory.categoryName === categoryName
         ),
       getCategoryColor,
+      convertFromBaseAmount,
+      formatDisplayCurrency,
       saveCategoryColor: async (categoryId, color) => {
         if (!userId) {
           setPreferencesError("You must be logged in to manage category colors.");
@@ -1596,8 +1947,8 @@ export function TransactionsProvider({
       },
       closeSavingsGoalModal: () => setIsSavingsGoalModalOpen(false),
       currencySymbol,
-      toggleCurrencySymbol: () =>
-        setCurrencySymbol((current) => (current === "$" ? "Rs" : "$")),
+      displayCurrencyCode,
+      baseCurrencyCode,
       isTransactionsLoading,
       transactionsError,
       clearTransactionsError: () => setTransactionsError(""),
@@ -1617,6 +1968,10 @@ export function TransactionsProvider({
       isPreferencesLoading,
       preferencesError,
       clearPreferencesError: () => setPreferencesError(""),
+      isCurrencyPresetsLoading,
+      currencyPresetsError,
+      clearCurrencyPresetsError: () => setCurrencyPresetsError(""),
+      hasLoadedCurrencyPresets,
       isAppSettingsLoading,
       appSettingsError,
       clearAppSettingsError: () => setAppSettingsError(""),
@@ -1643,6 +1998,7 @@ export function TransactionsProvider({
           setBudgets([]);
           setSavingsGoal(null);
           setAppSettings(null);
+          setCurrencyPresets([]);
           setMonthlySnapshots([]);
           setSubcategories([]);
           setPreferences(null);
@@ -1655,6 +2011,7 @@ export function TransactionsProvider({
           setBudgetsError("");
           setSavingsGoalError("");
           setAppSettingsError("");
+          setCurrencyPresetsError("");
           setMonthlySnapshotsError("");
           setRolloverError("");
           lastRolloverAttemptKeyRef.current = null;
@@ -1681,12 +2038,19 @@ export function TransactionsProvider({
       categories,
       categoriesError,
       chartPalette,
+      convertFromBaseAmount,
+      currencyPresets,
+      currencyPresetsError,
       currencySymbol,
+      displayCurrencyCode,
       editingBudget,
+      formatDisplayCurrency,
       getCategoryColor,
+      baseCurrencyCode,
       hasLoadedAppSettings,
       hasLoadedBudgets,
       hasLoadedCategories,
+      hasLoadedCurrencyPresets,
       hasLoadedMonthlySnapshots,
       hasLoadedSavingsGoal,
       hasLoadedTransactions,
@@ -1695,6 +2059,7 @@ export function TransactionsProvider({
       isBudgetModalOpen,
       isBudgetsLoading,
       isCategoriesLoading,
+      isCurrencyPresetsLoading,
       isMonthlySnapshotsLoading,
       isPreferencesLoading,
       isRolloverPending,
@@ -1704,12 +2069,14 @@ export function TransactionsProvider({
       isTransactionsLoading,
       monthlySnapshots,
       monthlySnapshotsError,
+      preferences,
       preferencesError,
       rolloverError,
       refreshAppSettings,
       refreshBudgets,
       refreshCategories,
       refreshCategoriesDependencies,
+      refreshCurrencyPresets,
       refreshMonthlySnapshots,
       refreshPreferences,
       refreshSavingsGoal,

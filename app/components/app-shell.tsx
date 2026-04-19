@@ -68,10 +68,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const {
-    currencySymbol,
+    currencyPresets,
+    displayCurrencyCode,
     openAddModal,
     openBudgetModal,
-    toggleCurrencySymbol,
+    saveDisplayCurrencyCode,
   } = useTransactions();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const meta = routeMeta[pathname as keyof typeof routeMeta] ?? routeMeta["/"];
@@ -102,7 +103,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   href={item.href}
                   className={`${sharedClasses} ${
                     isActive
-                      ? "bg-white text-slate-950 shadow-lg"
+                      ? "bg-white text-black shadow-lg"
                       : "text-slate-300 hover:bg-white/8 hover:text-white"
                   }`}
                 >
@@ -111,11 +112,32 @@ export function AppShell({ children }: { children: ReactNode }) {
                       isActive ? "bg-accent" : "bg-slate-500"
                     }`}
                   />
-                  {item.label}
+                  <span className={isActive ? "text-black" : ""}>{item.label}</span>
                 </Link>
               );
             })}
           </nav>
+
+          <div className="mt-6 hidden rounded-3xl border border-white/10 bg-white/5 p-4 lg:block">
+            <label className="block space-y-2">
+              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                Display currency
+              </span>
+              <select
+                value={displayCurrencyCode}
+                onChange={(event) => {
+                  void saveDisplayCurrencyCode(event.target.value);
+                }}
+                className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm font-medium text-slate-100 outline-none transition focus:border-slate-400"
+              >
+                {currencyPresets.map((preset) => (
+                  <option key={preset.id} value={preset.currencyCode}>
+                    {preset.currencyCode} · {preset.currencySymbol}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
 
         </aside>
 
@@ -133,13 +155,22 @@ export function AppShell({ children }: { children: ReactNode }) {
               </div>
 
               <div className="flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  onClick={toggleCurrencySymbol}
-                  className="rounded-2xl border border-line bg-surface px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-                >
-                  {currencySymbol}
-                </button>
+                <label className="w-full md:hidden">
+                  <span className="sr-only">Display currency</span>
+                  <select
+                    value={displayCurrencyCode}
+                    onChange={(event) => {
+                      void saveDisplayCurrencyCode(event.target.value);
+                    }}
+                    className="w-full rounded-2xl border border-line bg-surface px-4 py-3 text-sm font-semibold text-slate-700 outline-none transition hover:border-slate-300 hover:bg-slate-50 focus:border-slate-400"
+                  >
+                    {currencyPresets.map((preset) => (
+                      <option key={preset.id} value={preset.currencyCode}>
+                        {preset.currencyCode} · {preset.currencySymbol}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <div className="rounded-2xl border border-line bg-surface px-4 py-3 text-sm text-muted">
                   Updated Apr 18, 2026
                 </div>

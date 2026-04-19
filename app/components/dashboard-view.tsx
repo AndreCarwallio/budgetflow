@@ -14,15 +14,6 @@ import { getActivePeriod } from "../lib/periods";
 import { chartPalettes } from "../lib/transactions";
 import { useTransactions } from "./transactions-provider";
 
-function formatCurrency(amount: number, currencySymbol: string) {
-  const formattedAmount = new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount);
-
-  return `${currencySymbol} ${formattedAmount}`;
-}
-
 function formatDate(date: string) {
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
@@ -76,8 +67,8 @@ export function DashboardView() {
     budgets,
     hasLoadedBudgets,
     hasLoadedSavingsGoal,
-    currencySymbol,
     hasLoadedTransactions,
+    formatDisplayCurrency,
     isBudgetsLoading,
     isSavingsGoalLoading,
     isTransactionsLoading,
@@ -165,21 +156,21 @@ export function DashboardView() {
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <SummaryCard
           title="Total Income"
-          value={formatCurrency(income, currencySymbol)}
+          value={formatDisplayCurrency(income)}
           detail="Income recorded for current month"
           tone="bg-emerald-50 text-emerald-700"
           badge="Monthly"
         />
         <SummaryCard
           title="Total Expenses"
-          value={formatCurrency(expenses, currencySymbol)}
+          value={formatDisplayCurrency(expenses)}
           detail="Expenses recorded for current month"
           tone="bg-rose-50 text-rose-700"
           badge="Monthly"
         />
         <SummaryCard
           title="Total Balance"
-          value={formatCurrency(remainingBalance, currencySymbol)}
+          value={formatDisplayCurrency(remainingBalance)}
           detail="Income minus expenses for current month"
           tone="bg-sky-50 text-sky-700"
           badge="Monthly"
@@ -234,13 +225,13 @@ export function DashboardView() {
                 <div>
                   <p className="text-sm font-medium text-muted">Total Savings</p>
                   <p className="mt-2 text-4xl font-semibold tracking-tight text-slate-950">
-                    {formatCurrency(totalSavings, currencySymbol)}
+                    {formatDisplayCurrency(totalSavings)}
                   </p>
                 </div>
                 <div className="text-sm text-muted sm:text-right">
                   <p>Target Savings</p>
                   <p className="mt-1 font-semibold text-slate-950">
-                    {formatCurrency(targetSavings, currencySymbol)}
+                    {formatDisplayCurrency(targetSavings)}
                   </p>
                 </div>
               </div>
@@ -342,7 +333,7 @@ export function DashboardView() {
                     }`}
                   >
                     {transaction.type === "income" ? "+" : "-"}
-                    {formatCurrency(transaction.amount, currencySymbol)}
+                    {formatDisplayCurrency(transaction.amount)}
                   </p>
                 </article>
               ))
@@ -457,7 +448,7 @@ export function DashboardView() {
                         </span>
                       </button>
                       <span className="font-semibold text-slate-950">
-                        {formatCurrency(amount, currencySymbol)}
+                        {formatDisplayCurrency(amount)}
                       </span>
                     </div>
                     <div className="h-3 rounded-full bg-slate-100">
@@ -486,7 +477,7 @@ export function DashboardView() {
                               >
                                 <span className="text-slate-600">{subcategory}</span>
                                 <span className="font-medium text-slate-900">
-                                  {formatCurrency(subcategoryAmount, currencySymbol)}
+                                  {formatDisplayCurrency(subcategoryAmount)}
                                 </span>
                               </div>
                             ))
@@ -562,7 +553,7 @@ export function DashboardView() {
                         </h3>
                       </div>
                       <p className="text-sm font-semibold text-slate-950">
-                        Budget: {formatCurrency(budget.monthlyLimit, currencySymbol)}
+                        Budget: {formatDisplayCurrency(budget.monthlyLimit)}
                       </p>
                     </div>
 
@@ -584,18 +575,12 @@ export function DashboardView() {
 
                     <div className="mt-3 flex items-center justify-between text-sm text-muted">
                       <span>
-                        Spent: {formatCurrency(budget.usedAmount, currencySymbol)}
+                        Spent: {formatDisplayCurrency(budget.usedAmount)}
                       </span>
                       <span>
                         {isOverBudget
-                          ? `Over by ${formatCurrency(
-                              Math.abs(remainingAmount),
-                              currencySymbol
-                            )}`
-                          : `Remaining: ${formatCurrency(
-                              remainingAmount,
-                              currencySymbol
-                            )}`}
+                          ? `Over by ${formatDisplayCurrency(Math.abs(remainingAmount))}`
+                          : `Remaining: ${formatDisplayCurrency(remainingAmount)}`}
                       </span>
                     </div>
                   </article>

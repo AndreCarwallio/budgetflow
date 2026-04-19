@@ -3,15 +3,6 @@
 import { useEffect, useState, useTransition } from "react";
 import { useTransactions } from "./transactions-provider";
 
-function formatCurrency(amount: number, currencySymbol: string) {
-  const formattedAmount = new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount);
-
-  return `${currencySymbol} ${formattedAmount}`;
-}
-
 function formatDate(date: string) {
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
@@ -47,7 +38,7 @@ export function ReportsView() {
     adjustMonthlySnapshot,
     clearMonthlySnapshotsError,
     clearRolloverError,
-    currencySymbol,
+    formatDisplayCurrency,
     getCategoryColor,
     hasLoadedAppSettings,
     hasLoadedMonthlySnapshots,
@@ -167,25 +158,25 @@ export function ReportsView() {
             <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <SummaryCard
                 title="Income"
-                value={formatCurrency(selectedSnapshot.incomeTotal, currencySymbol)}
+                value={formatDisplayCurrency(selectedSnapshot.incomeTotal)}
                 detail="Locked snapshot income"
                 tone="text-emerald-700"
               />
               <SummaryCard
                 title="Expenses"
-                value={formatCurrency(selectedSnapshot.expenseTotal, currencySymbol)}
+                value={formatDisplayCurrency(selectedSnapshot.expenseTotal)}
                 detail="Locked snapshot expenses"
                 tone="text-rose-700"
               />
               <SummaryCard
                 title="Net Change"
-                value={formatCurrency(selectedSnapshot.netChange, currencySymbol)}
+                value={formatDisplayCurrency(selectedSnapshot.netChange)}
                 detail="Income minus expenses"
                 tone={selectedSnapshot.netChange >= 0 ? "text-emerald-700" : "text-rose-700"}
               />
               <SummaryCard
                 title="Savings Total"
-                value={formatCurrency(selectedSnapshot.savingsTotal, currencySymbol)}
+                value={formatDisplayCurrency(selectedSnapshot.savingsTotal)}
                 detail={`${Math.round(
                   selectedSnapshot.targetSavings > 0
                     ? Math.max(
@@ -210,7 +201,7 @@ export function ReportsView() {
                     {selectedSnapshot.snapshotData.periodLabel}
                   </p>
                   <p className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
-                    {formatCurrency(selectedSnapshot.savingsTotal, currencySymbol)}
+                    {formatDisplayCurrency(selectedSnapshot.savingsTotal)}
                   </p>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-3">
@@ -219,7 +210,7 @@ export function ReportsView() {
                       Starting Savings
                     </p>
                     <p className="mt-2 font-semibold text-slate-950">
-                      {formatCurrency(selectedSnapshot.startingSavings, currencySymbol)}
+                      {formatDisplayCurrency(selectedSnapshot.startingSavings)}
                     </p>
                   </div>
                   <div className="rounded-2xl bg-white px-4 py-4">
@@ -227,7 +218,7 @@ export function ReportsView() {
                       Target Savings
                     </p>
                     <p className="mt-2 font-semibold text-slate-950">
-                      {formatCurrency(selectedSnapshot.targetSavings, currencySymbol)}
+                      {formatDisplayCurrency(selectedSnapshot.targetSavings)}
                     </p>
                   </div>
                   <div className="rounded-2xl bg-white px-4 py-4">
@@ -235,9 +226,8 @@ export function ReportsView() {
                       Remaining
                     </p>
                     <p className="mt-2 font-semibold text-slate-950">
-                      {formatCurrency(
-                        Math.max(selectedSnapshot.targetSavings - selectedSnapshot.savingsTotal, 0),
-                        currencySymbol
+                      {formatDisplayCurrency(
+                        Math.max(selectedSnapshot.targetSavings - selectedSnapshot.savingsTotal, 0)
                       )}
                     </p>
                   </div>
@@ -295,7 +285,7 @@ export function ReportsView() {
                           <div className="mb-2 flex items-center justify-between text-sm">
                             <span className="font-medium text-slate-700">{category}</span>
                             <span className="font-semibold text-slate-950">
-                              {formatCurrency(amount, currencySymbol)}
+                              {formatDisplayCurrency(amount)}
                             </span>
                           </div>
                           <div className="h-3 rounded-full bg-slate-100">
@@ -354,7 +344,7 @@ export function ReportsView() {
                               </h4>
                             </div>
                             <p className="text-sm font-semibold text-slate-950">
-                              Budget: {formatCurrency(budget.monthlyLimit, currencySymbol)}
+                              Budget: {formatDisplayCurrency(budget.monthlyLimit)}
                             </p>
                           </div>
 
@@ -376,18 +366,12 @@ export function ReportsView() {
 
                           <div className="mt-3 flex items-center justify-between text-sm text-muted">
                             <span>
-                              Spent: {formatCurrency(budget.usedAmount, currencySymbol)}
+                              Spent: {formatDisplayCurrency(budget.usedAmount)}
                             </span>
                             <span>
                               {isOverBudget
-                                ? `Over by ${formatCurrency(
-                                    Math.abs(remainingAmount),
-                                    currencySymbol
-                                  )}`
-                                : `Remaining: ${formatCurrency(
-                                    remainingAmount,
-                                    currencySymbol
-                                  )}`}
+                                ? `Over by ${formatDisplayCurrency(Math.abs(remainingAmount))}`
+                                : `Remaining: ${formatDisplayCurrency(remainingAmount)}`}
                             </span>
                           </div>
                         </article>
@@ -437,7 +421,7 @@ export function ReportsView() {
                         }`}
                       >
                         {transaction.type === "income" ? "+" : "-"}
-                        {formatCurrency(transaction.amount, currencySymbol)}
+                        {formatDisplayCurrency(transaction.amount)}
                       </p>
                     </article>
                   ))
