@@ -3,6 +3,9 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import {
+  savePendingStartingBalance,
+} from "../lib/starting-balance-onboarding";
 import { createClient } from "../lib/supabase/client";
 
 type AuthMode = "login" | "signup";
@@ -28,14 +31,39 @@ const authContent = {
   },
 } as const;
 
+function getFriendlyAuthErrorMessage(message: string) {
+  const normalizedMessage = message.toLowerCase();
+
+  if (normalizedMessage.includes("password")) {
+    return message;
+  }
+
+  if (normalizedMessage.includes("invalid login credentials")) {
+    return "Invalid email or password.";
+  }
+
+  return message;
+}
+
 export function AuthForm({ mode }: { mode: AuthMode }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [startingBalance, setStartingBalance] = useState("");
+  const [skipStartingBalance, setSkipStartingBalance] = useState(false);
+  const [isPasswordVisible, setIsPasswordVisible] = useState(false);
+  const [isResetMode, setIsResetMode] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [infoMessage, setInfoMessage] = useState("");
   const content = authContent[mode];
+
+  const passwordInputType = isPasswordVisible ? "text" : "password";
+  const parsedStartingBalance = Number.parseFloat(startingBalance);
+  const normalizedStartingBalance = Number.isFinite(parsedStartingBalance)
+    ? parsedStartingBalance
+    : 0;
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(15,118,110,0.12),_transparent_26%),linear-gradient(180deg,#f8fbff_0%,#f4f7fb_100%)] px-5 py-10">
@@ -55,6 +83,39 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
             setErrorMessage("");
             setInfoMessage("");
 
+            if (isResetMode && mode === "login") {
+              startTransition(async () => {
+                const supabase = createClient();
+                const resetResponse = await supabase.auth.resetPasswordForEmail(
+                  email,
+                  {
+                    redirectTo:
+                      typeof window === "undefined"
+                        ? undefined
+                        : `${window.location.origin}/auth/reset-password`,
+                  }
+                );
+
+                if (resetResponse.error) {
+                  setErrorMessage(
+                    "We couldn’t send a password reset email right now. Please try again."
+                  );
+                  return;
+                }
+
+                setInfoMessage(
+                  "If an account exists for that email, a password reset link has been sent."
+                );
+                setIsResetMode(false);
+              });
+              return;
+            }
+
+            if (mode === "signup" && password !== confirmPassword) {
+              setErrorMessage("Passwords do not match.");
+              return;
+            }
+
             startTransition(async () => {
               const supabase = createClient();
               const authResponse =
@@ -69,8 +130,19 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
                     });
 
               if (authResponse.error) {
-                setErrorMessage(authResponse.error.message);
+                setErrorMessage(getFriendlyAuthErrorMessage(authResponse.error.message));
                 return;
+              }
+
+              if (mode === "signup") {
+                savePendingStartingBalance({
+                  amount:
+                    skipStartingBalance || startingBalance.trim().length === 0
+                      ? 0
+                      : normalizedStartingBalance,
+                  skipped:
+                    skipStartingBalance || startingBalance.trim().length === 0,
+                });
               }
 
               if (mode === "signup" && !authResponse.data.session) {
@@ -98,20 +170,98 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
             />
           </label>
 
-          <label className="block space-y-2">
-            <span className="text-sm font-medium text-slate-700">Password</span>
-            <input
-              required
-              type="password"
-              autoComplete={
-                mode === "login" ? "current-password" : "new-password"
-              }
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className="w-full rounded-2xl border border-line bg-surface px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-slate-400"
-              placeholder="Enter your password"
-            />
-          </label>
+          {!isResetMode ? (
+            <label className="block space-y-2">
+              <span className="text-sm font-medium text-slate-700">Password</span>
+              <div className="relative">
+                <input
+                  required
+                  type={passwordInputType}
+                  autoComplete={
+                    mode === "login" ? "current-password" : "new-password"
+                  }
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  className="w-full rounded-2xl border border-line bg-surface px-4 py-3 pr-20 text-sm text-slate-950 outline-none transition focus:border-slate-400"
+                  placeholder="Enter your password"
+                />
+                <button
+                  type="button"
+                  onClick={() => setIsPasswordVisible((current) => !current)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 rounded-xl px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+                >
+                  {isPasswordVisible ? "Hide" : "Show"}
+                </button>
+              </div>
+            </label>
+          ) : (
+            <div className="rounded-2xl bg-slate-50 px-4 py-4 text-sm text-muted">
+              Enter your email address and we&apos;ll send a password reset link. If
+              the account exists, the email will be sent.
+            </div>
+          )}
+
+          {mode === "signup" ? (
+            <>
+              <label className="block space-y-2">
+                <span className="text-sm font-medium text-slate-700">
+                  Confirm password
+                </span>
+                <div className="relative">
+                  <input
+                    required
+                    type={passwordInputType}
+                    autoComplete="new-password"
+                    value={confirmPassword}
+                    onChange={(event) => setConfirmPassword(event.target.value)}
+                    className="w-full rounded-2xl border border-line bg-surface px-4 py-3 pr-20 text-sm text-slate-950 outline-none transition focus:border-slate-400"
+                    placeholder="Confirm your password"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setIsPasswordVisible((current) => !current)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 rounded-xl px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+                  >
+                    {isPasswordVisible ? "Hide" : "Show"}
+                  </button>
+                </div>
+              </label>
+
+              <label className="block space-y-2">
+                <span className="text-sm font-medium text-slate-700">
+                  Starting balance
+                </span>
+                <input
+                  type="number"
+                  step="0.01"
+                  disabled={skipStartingBalance}
+                  value={startingBalance}
+                  onChange={(event) => setStartingBalance(event.target.value)}
+                  className="w-full rounded-2xl border border-line bg-surface px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-slate-400 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+                  placeholder="0.00"
+                />
+                <div className="flex items-center justify-between gap-3 text-sm">
+                  <p className="text-muted">
+                    You can enter this later in Settings.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextSkipStartingBalance = !skipStartingBalance;
+                      setSkipStartingBalance(nextSkipStartingBalance);
+
+                      if (nextSkipStartingBalance) {
+                        setStartingBalance("");
+                      }
+                    }}
+                    className="font-semibold text-accent"
+                  >
+                    {skipStartingBalance ? "Use a balance" : "Skip"}
+                  </button>
+                </div>
+              </label>
+            </>
+          ) : null}
 
           {errorMessage ? (
             <p className="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -130,9 +280,27 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
             disabled={isPending}
             className="w-full rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-700"
           >
-            {isPending ? "Working..." : content.submitLabel}
+            {isPending
+              ? "Working..."
+              : isResetMode && mode === "login"
+                ? "Send reset link"
+                : content.submitLabel}
           </button>
         </form>
+
+        {mode === "login" ? (
+          <button
+            type="button"
+            onClick={() => {
+              setErrorMessage("");
+              setInfoMessage("");
+              setIsResetMode((current) => !current);
+            }}
+            className="mt-4 text-sm font-semibold text-accent"
+          >
+            {isResetMode ? "Back to login" : "Forgot password?"}
+          </button>
+        ) : null}
 
         <p className="mt-6 text-sm text-muted">
           {content.alternateLabel}{" "}

@@ -81,6 +81,10 @@ import {
   removeTransaction,
 } from "../lib/transactions-api";
 import {
+  clearPendingStartingBalance,
+  readPendingStartingBalance,
+} from "../lib/starting-balance-onboarding";
+import {
   chartPalettes,
   defaultCategoryColors,
   defaultTransactionCategories,
@@ -228,6 +232,8 @@ type SavingsGoalInput = {
   currentAmount: number;
 };
 
+type StartingBalanceSetupMode = "onboarding" | "settings";
+
 type CategoryInput = {
   name: string;
 };
@@ -289,6 +295,12 @@ type TransactionsContextValue = {
   isSavingsGoalModalOpen: boolean;
   openSavingsGoalModal: () => void;
   closeSavingsGoalModal: () => void;
+  isStartingBalanceModalOpen: boolean;
+  startingBalanceSetupMode: StartingBalanceSetupMode;
+  openStartingBalanceModal: (mode?: StartingBalanceSetupMode) => void;
+  closeStartingBalanceModal: () => void;
+  saveStartingBalance: (amount: number) => Promise<boolean>;
+  skipStartingBalanceSetup: () => Promise<boolean>;
   currencySymbol: string;
   displayCurrencyCode: string;
   baseCurrencyCode: string;
@@ -353,6 +365,8 @@ export function TransactionsProvider({
   const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
   const [editingBudget, setEditingBudget] = useState<Budget | null>(null);
   const [isSavingsGoalModalOpen, setIsSavingsGoalModalOpen] = useState(false);
+  const [startingBalanceSetupMode, setStartingBalanceSetupMode] =
+    useState<StartingBalanceSetupMode>("settings");
   const [isTransactionsLoading, setIsTransactionsLoading] = useState(true);
   const [hasLoadedTransactions, setHasLoadedTransactions] = useState(false);
   const [transactionsError, setTransactionsError] = useState("");
@@ -383,6 +397,7 @@ export function TransactionsProvider({
   const [isResettingUserData, setIsResettingUserData] = useState(false);
   const isHandlingRolloverRef = useRef(false);
   const lastRolloverAttemptKeyRef = useRef<string | null>(null);
+  const hasPromptedForStartingBalanceRef = useRef(false);
 
   const refreshTransactions = useCallback(async () => {
     if (!userId) {
@@ -565,6 +580,66 @@ export function TransactionsProvider({
       isActive = false;
     };
   }, [supabase, userId]);
+
+  useEffect(() => {
+    if (
+      !userId ||
+      isSavingsGoalLoading ||
+      isMonthlySnapshotsLoading ||
+      !hasLoadedSavingsGoal ||
+      !hasLoadedMonthlySnapshots ||
+      savingsGoal ||
+      monthlySnapshots.length > 0 ||
+      hasPromptedForStartingBalanceRef.current
+    ) {
+      return;
+    }
+
+    hasPromptedForStartingBalanceRef.current = true;
+
+    async function initializeStartingBalance() {
+      const pendingStartingBalance = readPendingStartingBalance();
+
+      if (!pendingStartingBalance) {
+        setSavingsGoalError("");
+        setStartingBalanceSetupMode("onboarding");
+        setIsSavingsGoalModalOpen(true);
+        return;
+      }
+
+      try {
+        await createSavingsGoal(supabase, userId, {
+          targetAmount: 0,
+          currentAmount: pendingStartingBalance.skipped
+            ? 0
+            : pendingStartingBalance.amount,
+        });
+        clearPendingStartingBalance();
+        await refreshSavingsGoal();
+      } catch (error) {
+        clearPendingStartingBalance();
+        setSavingsGoalError(
+          error instanceof Error
+            ? error.message
+            : "Unable to save your starting balance right now."
+        );
+        setStartingBalanceSetupMode("onboarding");
+        setIsSavingsGoalModalOpen(true);
+      }
+    }
+
+    void initializeStartingBalance();
+  }, [
+    refreshSavingsGoal,
+    hasLoadedMonthlySnapshots,
+    hasLoadedSavingsGoal,
+    isMonthlySnapshotsLoading,
+    isSavingsGoalLoading,
+    monthlySnapshots.length,
+    savingsGoal,
+    supabase,
+    userId,
+  ]);
 
   useEffect(() => {
     let isActive = true;
@@ -1075,11 +1150,27 @@ export function TransactionsProvider({
           period = getNextPeriod(period, appSettings);
         }
 
+        if (savingsGoal) {
+          await updateSavingsGoal(supabase, userId, savingsGoal.id, {
+            targetAmount: savingsGoal.targetAmount ?? 0,
+            currentAmount: previousSavingsTotal,
+          });
+        } else {
+          await createSavingsGoal(supabase, userId, {
+            targetAmount: 0,
+            currentAmount: previousSavingsTotal,
+          });
+        }
+
         await upsertAppSettings(supabase, userId, {
           ...currentSettingsPayload,
           lastPeriodKey: activePeriod.key,
         });
-        await Promise.all([refreshMonthlySnapshots(), refreshAppSettings()]);
+        await Promise.all([
+          refreshMonthlySnapshots(),
+          refreshAppSettings(),
+          refreshSavingsGoal(),
+        ]);
       } catch (error) {
         const message =
           error instanceof Error
@@ -1110,6 +1201,7 @@ export function TransactionsProvider({
     monthlySnapshots,
     refreshAppSettings,
     refreshMonthlySnapshots,
+    refreshSavingsGoal,
     savingsGoal,
     supabase,
     transactions,
@@ -1599,6 +1691,19 @@ export function TransactionsProvider({
             previousSavingsTotal = savingsTotal;
           }
 
+          if (savingsGoal) {
+            await updateSavingsGoal(supabase, userId, savingsGoal.id, {
+              targetAmount: savingsGoal.targetAmount ?? 0,
+              currentAmount: previousSavingsTotal,
+            });
+          } else {
+            await createSavingsGoal(supabase, userId, {
+              targetAmount: 0,
+              currentAmount: previousSavingsTotal,
+            });
+          }
+
+          await refreshSavingsGoal();
           await refreshMonthlySnapshots();
           return true;
         } catch (error) {
@@ -1943,9 +2048,96 @@ export function TransactionsProvider({
       isSavingsGoalModalOpen,
       openSavingsGoalModal: () => {
         setSavingsGoalError("");
+        setStartingBalanceSetupMode("settings");
         setIsSavingsGoalModalOpen(true);
       },
       closeSavingsGoalModal: () => setIsSavingsGoalModalOpen(false),
+      isStartingBalanceModalOpen: isSavingsGoalModalOpen,
+      startingBalanceSetupMode,
+      openStartingBalanceModal: (mode = "settings") => {
+        setSavingsGoalError("");
+        setStartingBalanceSetupMode(mode);
+        setIsSavingsGoalModalOpen(true);
+      },
+      closeStartingBalanceModal: () => {
+        setStartingBalanceSetupMode("settings");
+        setIsSavingsGoalModalOpen(false);
+      },
+      saveStartingBalance: async (amount) => {
+        if (!userId) {
+          setSavingsGoalError("You must be logged in to manage your balance.");
+          return false;
+        }
+
+        if (!Number.isFinite(amount)) {
+          setSavingsGoalError("Enter a valid starting balance.");
+          return false;
+        }
+
+        setSavingsGoalError("");
+
+        try {
+          if (savingsGoal) {
+            await updateSavingsGoal(supabase, userId, savingsGoal.id, {
+              targetAmount: savingsGoal.targetAmount ?? 0,
+              currentAmount: amount,
+            });
+          } else {
+            await createSavingsGoal(supabase, userId, {
+              targetAmount: 0,
+              currentAmount: amount,
+            });
+          }
+
+          await refreshSavingsGoal();
+          clearPendingStartingBalance();
+          setStartingBalanceSetupMode("settings");
+          setIsSavingsGoalModalOpen(false);
+          return true;
+        } catch (error) {
+          setSavingsGoalError(
+            error instanceof Error
+              ? error.message
+              : "Unable to save your starting balance right now."
+          );
+          return false;
+        }
+      },
+      skipStartingBalanceSetup: async () => {
+        if (!userId) {
+          setSavingsGoalError("You must be logged in to manage your balance.");
+          return false;
+        }
+
+        setSavingsGoalError("");
+
+        try {
+          if (savingsGoal) {
+            await updateSavingsGoal(supabase, userId, savingsGoal.id, {
+              targetAmount: savingsGoal.targetAmount ?? 0,
+              currentAmount: 0,
+            });
+          } else {
+            await createSavingsGoal(supabase, userId, {
+              targetAmount: 0,
+              currentAmount: 0,
+            });
+          }
+
+          await refreshSavingsGoal();
+          clearPendingStartingBalance();
+          setStartingBalanceSetupMode("settings");
+          setIsSavingsGoalModalOpen(false);
+          return true;
+        } catch (error) {
+          setSavingsGoalError(
+            error instanceof Error
+              ? error.message
+              : "Unable to skip balance setup right now."
+          );
+          return false;
+        }
+      },
       currencySymbol,
       displayCurrencyCode,
       baseCurrencyCode,
@@ -2007,6 +2199,9 @@ export function TransactionsProvider({
           setIsBudgetModalOpen(false);
           setEditingBudget(null);
           setIsSavingsGoalModalOpen(false);
+          setStartingBalanceSetupMode("settings");
+          hasPromptedForStartingBalanceRef.current = false;
+          clearPendingStartingBalance();
           setTransactionsError("");
           setBudgetsError("");
           setSavingsGoalError("");
@@ -2066,6 +2261,7 @@ export function TransactionsProvider({
       isResettingUserData,
       isSavingsGoalLoading,
       isSavingsGoalModalOpen,
+      startingBalanceSetupMode,
       isTransactionsLoading,
       monthlySnapshots,
       monthlySnapshotsError,

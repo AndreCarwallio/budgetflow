@@ -7,14 +7,13 @@ import { startTransition, type ReactNode, useState } from "react";
 import { createClient } from "../lib/supabase/client";
 import { AddTransactionModal } from "./add-transaction-modal";
 import { BudgetModal } from "./budget-modal";
-import { SavingsGoalModal } from "./savings-goal-modal";
+import { StartingBalanceModal } from "./starting-balance-modal";
 import { useTransactions } from "./transactions-provider";
 
 const navigationItems = [
   { label: "Dashboard", href: "/" },
   { label: "Transactions", href: "/transactions" },
   { label: "Budgets", href: "/budgets" },
-  { label: "Savings", href: "/savings" },
   { label: "Reports", href: "/reports" },
   { label: "Settings", href: "/settings" },
 ] as const;
@@ -40,13 +39,6 @@ const routeMeta = {
     description: "Manage your monthly category budgets and compare them with real spending.",
     actionLabel: "New budget",
     actionKind: "budget",
-  },
-  "/savings": {
-    eyebrow: "BudgetFlow",
-    title: "Savings",
-    description: "Manage your savings plan, carried savings totals, and progress toward your target.",
-    actionLabel: "Open savings",
-    actionKind: "none",
   },
   "/settings": {
     eyebrow: "BudgetFlow",
@@ -221,7 +213,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <AddTransactionModal />
       <BudgetModal />
-      <SavingsGoalModal />
+      <StartingBalanceModal />
     </main>
   );
 }

@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { type ReactNode, useEffect, useMemo, useState, useTransition } from "react";
 import { categoryColorOptions, chartPalettes } from "../lib/transactions";
 import { useTransactions } from "./transactions-provider";
@@ -120,6 +119,7 @@ export function SettingsView() {
     displayCurrencyCode,
     deleteCategory,
     deleteSubcategory,
+    formatDisplayCurrency,
     getSubcategoriesForCategory,
     getCategoryColor,
     hasLoadedAppSettings,
@@ -135,11 +135,14 @@ export function SettingsView() {
     renameCategory,
     renameSubcategory,
     resetUserData,
+    openStartingBalanceModal,
     saveCategoryColor,
     saveChartPalette,
     saveAppSettings,
     saveCurrencyPreset,
     saveDisplayCurrencyCode,
+    monthlySnapshots,
+    savingsGoal,
     currencySymbol,
   } = useTransactions();
   const [newCategoryName, setNewCategoryName] = useState("");
@@ -173,7 +176,7 @@ export function SettingsView() {
     categories: false,
     currency: false,
     appearance: false,
-    savings: false,
+    balance: false,
     account: false,
     data: false,
   });
@@ -202,6 +205,10 @@ export function SettingsView() {
     [categories, getSubcategoriesForCategory]
   );
   const customCategoryCount = categories.filter((category) => !category.isFallback).length;
+  const currentBalanceBroughtForward =
+    savingsGoal?.currentAmount ??
+    monthlySnapshots[monthlySnapshots.length - 1]?.savingsTotal ??
+    0;
 
   function toggleSection(sectionId: keyof typeof openSections) {
     setOpenSections((current) => ({
@@ -972,21 +979,26 @@ export function SettingsView() {
         </AccordionSection>
 
         <AccordionSection
-          title="Savings Settings"
-          description="Open the dedicated Savings page to manage your savings plan and related controls."
-          isOpen={openSections.savings}
-          onToggle={() => toggleSection("savings")}
+          title="Balance Brought Forward"
+          description="Review and edit the balance carried into the current live month."
+          isOpen={openSections.balance}
+          onToggle={() => toggleSection("balance")}
         >
           <div className="rounded-2xl bg-slate-50 px-5 py-5">
             <p className="text-sm text-muted">
-              Savings management has moved to its own page so the dashboard stays display-only. Use the Savings page to edit starting savings, target savings, and reset the savings plan.
+              This value is your starting balance before the current month&apos;s
+              income and expenses are applied.
             </p>
-            <Link
-              href="/savings"
+            <p className="mt-4 text-2xl font-semibold text-slate-950">
+              {formatDisplayCurrency(currentBalanceBroughtForward)}
+            </p>
+            <button
+              type="button"
+              onClick={() => openStartingBalanceModal("settings")}
               className="mt-4 inline-flex rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
             >
-              Open Savings
-            </Link>
+              Edit balance
+            </button>
           </div>
         </AccordionSection>
 
@@ -1055,7 +1067,7 @@ export function SettingsView() {
           <div className="rounded-2xl border border-rose-200 bg-rose-50 px-5 py-5">
             <p className="text-sm font-semibold text-rose-900">Danger zone</p>
             <p className="mt-2 text-sm leading-6 text-rose-800">
-              Resetting data deletes this account&apos;s transactions, budgets, savings goal, reset period settings, snapshot history, saved currencies, custom categories, subcategories, and appearance preferences. It does not delete the auth account, and default categories remain available afterward.
+              Resetting data deletes this account&apos;s transactions, budgets, balance brought forward value, reset period settings, snapshot history, saved currencies, custom categories, subcategories, and appearance preferences. It does not delete the auth account, and default categories remain available afterward.
             </p>
             <button
               type="button"
@@ -1085,7 +1097,7 @@ export function SettingsView() {
                   Confirm data reset
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-muted">
-                  This permanently removes only this user&apos;s transactions, budgets, savings goal, reset period settings, snapshot history, saved currencies, custom categories, subcategories, and chart preferences. Type <span className="font-semibold text-slate-950">RESET</span> to continue.
+                  This permanently removes only this user&apos;s transactions, budgets, balance brought forward value, reset period settings, snapshot history, saved currencies, custom categories, subcategories, and chart preferences. Type <span className="font-semibold text-slate-950">RESET</span> to continue.
                 </p>
               </div>
               <button

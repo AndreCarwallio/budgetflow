@@ -211,3 +211,17 @@ export function getTotalSavingsValue(
     remainingToGoal: Math.max((savingsGoal?.targetAmount ?? 0) - totalSavings, 0),
   };
 }
+
+export function getBalanceBroughtForwardValue(
+  savingsGoal: SavingsGoal | null
+) {
+  return savingsGoal?.currentAmount ?? 0;
+}
+
+export function getTotalBalanceValue(
+  balanceBroughtForward: number,
+  income: number,
+  expenses: number
+) {
+  return balanceBroughtForward + income - expenses;
+}

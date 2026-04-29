@@ -2,11 +2,12 @@
 
 import { useState } from "react";
 import {
+  getBalanceBroughtForwardValue,
   getBudgetUsageSummaryForTransactions,
   getCategorySpending,
   getIncomeExpensesForTransactions,
+  getTotalBalanceValue,
   getMonthlySpendingPoints,
-  getTotalSavingsValue,
   getTransactionsInRange,
   getWeeklySpendingPoints,
 } from "../lib/dashboard-metrics";
@@ -66,17 +67,14 @@ export function DashboardView() {
     appSettings,
     budgets,
     hasLoadedBudgets,
-    hasLoadedSavingsGoal,
     hasLoadedTransactions,
     formatDisplayCurrency,
     isBudgetsLoading,
-    isSavingsGoalLoading,
     isTransactionsLoading,
     chartPalette,
     getCategoryColor,
     monthlySnapshots,
     savingsGoal,
-    savingsGoalError,
     transactions,
     transactionsError,
   } = useTransactions();
@@ -94,22 +92,24 @@ export function DashboardView() {
     getIncomeExpensesForTransactions(currentPeriodTransactions);
   const latestSnapshot =
     monthlySnapshots.length > 0 ? monthlySnapshots[monthlySnapshots.length - 1] : null;
-  const {
-    totalSavings,
-  } = getTotalSavingsValue(
+  const balanceBroughtForward = getBalanceBroughtForwardValue(
     savingsGoal
-      ? {
-          ...savingsGoal,
-          currentAmount: latestSnapshot?.savingsTotal ?? savingsGoal.currentAmount,
-        }
-      : null,
-    remainingBalance
+      ? savingsGoal
+      : latestSnapshot
+        ? {
+            id: latestSnapshot.id,
+            userId: latestSnapshot.userId,
+            createdAt: latestSnapshot.createdAt,
+            currentAmount: latestSnapshot.savingsTotal,
+            targetAmount: 0,
+          }
+        : null
   );
-  const targetSavings = savingsGoal?.targetAmount ?? 0;
-  const savingsProgress =
-    targetSavings > 0
-      ? Math.max(0, Math.min((totalSavings / targetSavings) * 100, 100))
-      : 0;
+  const totalBalance = getTotalBalanceValue(
+    balanceBroughtForward,
+    income,
+    expenses
+  );
   const recentTransactions = [...transactions]
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, 4);
@@ -153,7 +153,14 @@ export function DashboardView() {
 
   return (
     <>
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <SummaryCard
+          title="Balance Brought Forward"
+          value={formatDisplayCurrency(balanceBroughtForward)}
+          detail="Starting balance carried into current month"
+          tone="bg-amber-50 text-amber-700"
+          badge="Monthly"
+        />
         <SummaryCard
           title="Total Income"
           value={formatDisplayCurrency(income)}
@@ -170,81 +177,11 @@ export function DashboardView() {
         />
         <SummaryCard
           title="Total Balance"
-          value={formatDisplayCurrency(remainingBalance)}
-          detail="Income minus expenses for current month"
+          value={formatDisplayCurrency(totalBalance)}
+          detail="Balance brought forward plus income minus expenses"
           tone="bg-sky-50 text-sky-700"
           badge="Monthly"
         />
-      </section>
-
-      <section className="mt-6 rounded-[28px] border border-line bg-surface p-6 shadow-[0_18px_40px_rgba(15,23,42,0.05)]">
-        <div>
-          <div>
-            <h2 className="text-xl font-semibold tracking-tight text-slate-950">
-              Savings
-            </h2>
-            <p className="mt-1 text-sm text-muted">
-              Starting savings adjusted by the current month net change and tracked against your target savings.
-            </p>
-          </div>
-        </div>
-
-        {isSavingsGoalLoading ? (
-          <div className="mt-6 space-y-4 rounded-3xl bg-slate-50 px-5 py-5">
-            <div className="h-10 w-48 animate-pulse rounded-2xl bg-white" />
-            <div className="h-3 w-full animate-pulse rounded-full bg-white" />
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-              {[0, 1, 2, 3, 4].map((item) => (
-                <div
-                  key={item}
-                  className="animate-pulse rounded-2xl bg-white px-4 py-4"
-                >
-                  <div className="h-3 w-24 rounded-full bg-slate-100" />
-                  <div className="mt-3 h-6 w-28 rounded-full bg-slate-200" />
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : savingsGoalError ? (
-          <div className="mt-6 rounded-2xl bg-rose-50 px-4 py-4 text-sm text-rose-700">
-            {savingsGoalError}
-          </div>
-        ) : !savingsGoal && hasLoadedSavingsGoal ? (
-          <div className="mt-6 rounded-3xl bg-slate-50 px-5 py-8">
-            <p className="text-base font-semibold text-slate-900">
-              No savings plan yet
-            </p>
-            <p className="mt-2 max-w-2xl text-sm text-muted">
-              Set up your savings plan from the Savings page to start tracking carried savings and target progress.
-            </p>
-          </div>
-        ) : (
-          <>
-            <div className="mt-6">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                  <p className="text-sm font-medium text-muted">Total Savings</p>
-                  <p className="mt-2 text-4xl font-semibold tracking-tight text-slate-950">
-                    {formatDisplayCurrency(totalSavings)}
-                  </p>
-                </div>
-                <div className="text-sm text-muted sm:text-right">
-                  <p>Target Savings</p>
-                  <p className="mt-1 font-semibold text-slate-950">
-                    {formatDisplayCurrency(targetSavings)}
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-5 h-3 rounded-full bg-slate-100">
-                <div
-                  className="h-3 rounded-full bg-gradient-to-r from-amber-400 via-teal-400 to-sky-500 transition-[width]"
-                  style={{ width: `${savingsProgress}%` }}
-                />
-              </div>
-            </div>
-          </>
-        )}
       </section>
 
       <div className="mt-6 grid gap-6 xl:grid-cols-[1.55fr_1fr]">

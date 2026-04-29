@@ -54,7 +54,6 @@ export function ReportsView() {
   const [startingSavings, setStartingSavings] = useState("");
   const [incomeTotal, setIncomeTotal] = useState("");
   const [expenseTotal, setExpenseTotal] = useState("");
-  const [targetSavings, setTargetSavings] = useState("");
   const [isPending, startTransition] = useTransition();
 
   const snapshots = [...monthlySnapshots].sort((left, right) =>
@@ -91,7 +90,6 @@ export function ReportsView() {
     setStartingSavings(selectedSnapshot.startingSavings.toFixed(2));
     setIncomeTotal(selectedSnapshot.incomeTotal.toFixed(2));
     setExpenseTotal(selectedSnapshot.expenseTotal.toFixed(2));
-    setTargetSavings(selectedSnapshot.targetSavings.toFixed(2));
   }, [selectedSnapshot]);
 
   return (
@@ -175,21 +173,9 @@ export function ReportsView() {
                 tone={selectedSnapshot.netChange >= 0 ? "text-emerald-700" : "text-rose-700"}
               />
               <SummaryCard
-                title="Savings Total"
+                title="Ending Balance"
                 value={formatDisplayCurrency(selectedSnapshot.savingsTotal)}
-                detail={`${Math.round(
-                  selectedSnapshot.targetSavings > 0
-                    ? Math.max(
-                        0,
-                        Math.min(
-                          (selectedSnapshot.savingsTotal /
-                            selectedSnapshot.targetSavings) *
-                            100,
-                          100
-                        )
-                      )
-                    : 0
-                )}% of target`}
+                detail="Locked month-end balance"
                 tone="text-amber-700"
               />
             </section>
@@ -207,7 +193,7 @@ export function ReportsView() {
                 <div className="grid gap-3 sm:grid-cols-3">
                   <div className="rounded-2xl bg-white px-4 py-4">
                     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-                      Starting Savings
+                      Balance Brought Forward
                     </p>
                     <p className="mt-2 font-semibold text-slate-950">
                       {formatDisplayCurrency(selectedSnapshot.startingSavings)}
@@ -215,40 +201,21 @@ export function ReportsView() {
                   </div>
                   <div className="rounded-2xl bg-white px-4 py-4">
                     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-                      Target Savings
+                      Net Change
                     </p>
                     <p className="mt-2 font-semibold text-slate-950">
-                      {formatDisplayCurrency(selectedSnapshot.targetSavings)}
+                      {formatDisplayCurrency(selectedSnapshot.netChange)}
                     </p>
                   </div>
                   <div className="rounded-2xl bg-white px-4 py-4">
                     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-                      Remaining
+                      Ending Balance
                     </p>
                     <p className="mt-2 font-semibold text-slate-950">
-                      {formatDisplayCurrency(
-                        Math.max(selectedSnapshot.targetSavings - selectedSnapshot.savingsTotal, 0)
-                      )}
+                      {formatDisplayCurrency(selectedSnapshot.savingsTotal)}
                     </p>
                   </div>
                 </div>
-              </div>
-
-              <div className="mt-5 h-3 rounded-full bg-white">
-                <div
-                  className="h-3 rounded-full bg-gradient-to-r from-amber-400 via-teal-400 to-sky-500"
-                  style={{
-                    width: `${Math.max(
-                      0,
-                      Math.min(
-                        selectedSnapshot.targetSavings > 0
-                          ? (selectedSnapshot.savingsTotal / selectedSnapshot.targetSavings) * 100
-                          : 0,
-                        100
-                      )
-                    )}%`,
-                  }}
-                />
               </div>
 
               {selectedSnapshot.snapshotData.adjustment ? (
@@ -444,7 +411,7 @@ export function ReportsView() {
                   Adjust {selectedSnapshot.snapshotData.periodLabel}
                 </h2>
                 <p className="mt-2 text-sm text-muted">
-                  This updates the selected snapshot totals, then recalculates later snapshots so carried-forward savings remain logically consistent.
+                  This updates the selected snapshot totals, then recalculates later snapshots so carried-forward balances remain logically consistent.
                 </p>
               </div>
               <button
@@ -468,7 +435,7 @@ export function ReportsView() {
                     startingSavings: Number.parseFloat(startingSavings),
                     incomeTotal: Number.parseFloat(incomeTotal),
                     expenseTotal: Number.parseFloat(expenseTotal),
-                    targetSavings: Number.parseFloat(targetSavings),
+                    targetSavings: 0,
                   });
 
                   if (didSave) {
@@ -480,29 +447,14 @@ export function ReportsView() {
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="space-y-2">
                   <span className="text-sm font-medium text-slate-700">
-                    Starting savings
+                    Balance Brought Forward
                   </span>
                   <input
                     required
-                    min="0"
                     step="0.01"
                     type="number"
                     value={startingSavings}
                     onChange={(event) => setStartingSavings(event.target.value)}
-                    className="w-full rounded-2xl border border-line bg-surface px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-slate-400"
-                  />
-                </label>
-                <label className="space-y-2">
-                  <span className="text-sm font-medium text-slate-700">
-                    Target savings
-                  </span>
-                  <input
-                    required
-                    min="0"
-                    step="0.01"
-                    type="number"
-                    value={targetSavings}
-                    onChange={(event) => setTargetSavings(event.target.value)}
                     className="w-full rounded-2xl border border-line bg-surface px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-slate-400"
                   />
                 </label>
