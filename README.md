@@ -1,5 +1,5 @@
 BudgetFlow is a full-stack personal budgeting application designed to simplify financial tracking and provide users with an organized, user-friendly dashboard experience.
-Live Demo
+
 
 Features
 User authentication and account management
